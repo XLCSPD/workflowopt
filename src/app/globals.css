@@ -2,26 +2,181 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
-body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
-}
-
 @layer utilities {
   .text-balance {
     text-wrap: balance;
   }
+}
+
+@layer base {
+  :root {
+    /* Versatex Brand Colors */
+    --brand-gold: 45 100% 50%;
+    --brand-charcoal: 0 0% 33%;
+    --brand-navy: 209 63% 16%;
+    --brand-emerald: 145 64% 36%;
+    --brand-platinum: 210 33% 96%;
+
+    /* Theme colors using Versatex branding */
+    --background: 210 33% 98%;
+    --foreground: 209 63% 16%;
+    --card: 0 0% 100%;
+    --card-foreground: 209 63% 16%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 209 63% 16%;
+    --primary: 45 100% 50%;
+    --primary-foreground: 209 63% 16%;
+    --secondary: 210 33% 96%;
+    --secondary-foreground: 0 0% 33%;
+    --muted: 210 33% 96%;
+    --muted-foreground: 0 0% 45%;
+    --accent: 209 63% 16%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 145 64% 36%;
+    --success-foreground: 0 0% 100%;
+    --border: 210 20% 90%;
+    --input: 210 20% 90%;
+    --ring: 45 100% 50%;
+    --chart-1: 45 100% 50%;
+    --chart-2: 145 64% 36%;
+    --chart-3: 209 63% 16%;
+    --chart-4: 0 84% 60%;
+    --chart-5: 280 65% 60%;
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    --background: 209 63% 10%;
+    --foreground: 210 33% 96%;
+    --card: 209 63% 14%;
+    --card-foreground: 210 33% 96%;
+    --popover: 209 63% 14%;
+    --popover-foreground: 210 33% 96%;
+    --primary: 45 100% 50%;
+    --primary-foreground: 209 63% 16%;
+    --secondary: 209 50% 20%;
+    --secondary-foreground: 210 33% 96%;
+    --muted: 209 50% 20%;
+    --muted-foreground: 210 20% 65%;
+    --accent: 45 100% 50%;
+    --accent-foreground: 209 63% 16%;
+    --destructive: 0 62% 30%;
+    --destructive-foreground: 0 0% 98%;
+    --success: 145 64% 36%;
+    --success-foreground: 0 0% 100%;
+    --border: 209 50% 20%;
+    --input: 209 50% 20%;
+    --ring: 45 100% 50%;
+    --chart-1: 45 100% 55%;
+    --chart-2: 145 60% 45%;
+    --chart-3: 200 70% 50%;
+    --chart-4: 0 70% 50%;
+    --chart-5: 280 65% 60%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+/* Custom scrollbar styling */
+@layer utilities {
+  .scrollbar-thin {
+    scrollbar-width: thin;
+  }
+  
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: hsl(var(--muted));
+    border-radius: 3px;
+  }
+  
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted-foreground) / 0.3);
+    border-radius: 3px;
+  }
+  
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.5);
+  }
+}
+
+/* React Flow customizations */
+.react-flow__node {
+  cursor: pointer;
+}
+
+.react-flow__controls {
+  box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+}
+
+/* Heatmap color scale */
+.heatmap-low {
+  background-color: hsl(145 64% 80%);
+}
+
+.heatmap-medium {
+  background-color: hsl(45 100% 70%);
+}
+
+.heatmap-high {
+  background-color: hsl(0 84% 70%);
+}
+
+/* Animation utilities */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes pulse-ring {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1.5);
+    opacity: 0;
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out forwards;
+}
+
+.animate-slide-in-right {
+  animation: slideInRight 0.3s ease-out forwards;
+}
+
+.animate-pulse-ring {
+  animation: pulse-ring 1.5s ease-out infinite;
 }

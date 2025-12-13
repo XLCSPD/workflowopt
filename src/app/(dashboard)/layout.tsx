@@ -1,0 +1,92 @@
+"use client";
+
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { Sidebar } from "@/components/layout/Sidebar";
+import { useAuthStore } from "@/lib/stores/authStore";
+import { getSupabaseClient } from "@/lib/supabase/client";
+import { Loader2 } from "lucide-react";
+import type { User } from "@/types";
+
+export default function DashboardLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const router = useRouter();
+  const { isLoading, setUser, setLoading } = useAuthStore();
+  const supabase = getSupabaseClient();
+
+  useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        const { data: { session: authSession } } = await supabase.auth.getSession();
+        
+        if (!authSession) {
+          router.push("/login");
+          return;
+        }
+
+        // Get user profile from database
+        const { data: profile } = await supabase
+          .from("users")
+          .select("*")
+          .eq("id", authSession.user.id)
+          .single();
+
+        if (profile) {
+          setUser(profile);
+        } else {
+          // Create user profile if doesn't exist
+          const newProfile: Partial<User> = {
+            id: authSession.user.id,
+            email: authSession.user.email!,
+            name: authSession.user.user_metadata.name || authSession.user.email!.split("@")[0],
+            role: "participant" as const,
+          };
+          
+          await supabase.from("users").insert(newProfile);
+          setUser(newProfile as User);
+        }
+      } catch (error) {
+        console.error("Auth check error:", error);
+        router.push("/login");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    checkAuth();
+
+    // Listen for auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event: string) => {
+        if (event === "SIGNED_OUT") {
+          setUser(null);
+          router.push("/login");
+        }
+      }
+    );
+
+    return () => subscription.unsubscribe();
+  }, [supabase, router, setUser, setLoading]);
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-brand-platinum">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="h-8 w-8 animate-spin text-brand-gold" />
+          <p className="text-brand-charcoal">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-screen bg-brand-platinum/30">
+      <Sidebar />
+      <main className="flex-1 overflow-auto">{children}</main>
+    </div>
+  );
+}
+

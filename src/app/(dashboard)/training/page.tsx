@@ -1,0 +1,299 @@
+"use client";
+
+import { useState } from "react";
+import Link from "next/link";
+import { Header } from "@/components/layout/Header";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
+import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Play,
+  CheckCircle,
+  Clock,
+  Video,
+  FileText,
+  BookOpen,
+  HelpCircle,
+  ArrowRight,
+  Lock,
+} from "lucide-react";
+
+interface TrainingModule {
+  id: string;
+  title: string;
+  description: string;
+  type: "video" | "slides" | "article" | "quiz";
+  duration: number;
+  status: "completed" | "in_progress" | "locked" | "available";
+  progress?: number;
+}
+
+const trainingModules: TrainingModule[] = [
+  {
+    id: "1",
+    title: "Introduction to Lean Waste",
+    description: "Learn the fundamentals of Lean methodology and waste identification",
+    type: "video",
+    duration: 15,
+    status: "completed",
+  },
+  {
+    id: "2",
+    title: "DOWNTIME Wastes Explained",
+    description: "Deep dive into the 8 traditional Lean wastes",
+    type: "slides",
+    duration: 20,
+    status: "in_progress",
+    progress: 45,
+  },
+  {
+    id: "3",
+    title: "Digital Waste in Modern Workflows",
+    description: "Understanding waste unique to digital environments",
+    type: "article",
+    duration: 10,
+    status: "available",
+  },
+  {
+    id: "4",
+    title: "Waste Identification Quiz",
+    description: "Test your knowledge of Lean waste types",
+    type: "quiz",
+    duration: 15,
+    status: "locked",
+  },
+];
+
+const getTypeIcon = (type: string) => {
+  switch (type) {
+    case "video":
+      return Video;
+    case "slides":
+      return FileText;
+    case "article":
+      return BookOpen;
+    case "quiz":
+      return HelpCircle;
+    default:
+      return FileText;
+  }
+};
+
+const getStatusBadge = (status: string, progress?: number) => {
+  switch (status) {
+    case "completed":
+      return (
+        <Badge className="bg-brand-emerald text-white">
+          <CheckCircle className="w-3 h-3 mr-1" />
+          Completed
+        </Badge>
+      );
+    case "in_progress":
+      return (
+        <Badge className="bg-brand-gold text-brand-navy">
+          <Play className="w-3 h-3 mr-1" />
+          {progress}% Complete
+        </Badge>
+      );
+    case "locked":
+      return (
+        <Badge variant="secondary">
+          <Lock className="w-3 h-3 mr-1" />
+          Locked
+        </Badge>
+      );
+    default:
+      return (
+        <Badge variant="outline">
+          <Clock className="w-3 h-3 mr-1" />
+          Available
+        </Badge>
+      );
+  }
+};
+
+export default function TrainingPage() {
+  const [activeTab, setActiveTab] = useState("all");
+  
+  const completedCount = trainingModules.filter(m => m.status === "completed").length;
+  const totalCount = trainingModules.length;
+  const overallProgress = Math.round((completedCount / totalCount) * 100);
+
+  const filteredModules = activeTab === "all" 
+    ? trainingModules 
+    : trainingModules.filter(m => m.type === activeTab);
+
+  return (
+    <div className="flex flex-col h-full">
+      <Header
+        title="Training Library"
+        description="Master Lean waste identification with our comprehensive training modules"
+        actions={
+          <Button asChild variant="outline">
+            <Link href="/training/cheat-sheet">
+              <BookOpen className="mr-2 h-4 w-4" />
+              Waste Cheat Sheet
+            </Link>
+          </Button>
+        }
+      />
+
+      <div className="flex-1 p-6 space-y-6 overflow-auto">
+        {/* Progress Overview */}
+        <Card className="bg-gradient-to-r from-brand-navy to-brand-navy/90 text-white">
+          <CardContent className="pt-6">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="space-y-2">
+                <h2 className="text-2xl font-bold">Your Training Progress</h2>
+                <p className="text-white/80">
+                  {completedCount} of {totalCount} modules completed
+                </p>
+              </div>
+              <div className="w-full md:w-64 space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span>Overall Progress</span>
+                  <span className="font-bold">{overallProgress}%</span>
+                </div>
+                <Progress value={overallProgress} className="h-3 bg-white/20" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Module Filters */}
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <TabsList className="bg-muted/50">
+            <TabsTrigger value="all">All Modules</TabsTrigger>
+            <TabsTrigger value="video">
+              <Video className="w-4 h-4 mr-2" />
+              Videos
+            </TabsTrigger>
+            <TabsTrigger value="slides">
+              <FileText className="w-4 h-4 mr-2" />
+              Slides
+            </TabsTrigger>
+            <TabsTrigger value="article">
+              <BookOpen className="w-4 h-4 mr-2" />
+              Articles
+            </TabsTrigger>
+            <TabsTrigger value="quiz">
+              <HelpCircle className="w-4 h-4 mr-2" />
+              Quizzes
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value={activeTab} className="mt-6">
+            <div className="grid gap-4 md:grid-cols-2">
+              {filteredModules.map((module) => {
+                const Icon = getTypeIcon(module.type);
+                const isDisabled = module.status === "locked";
+
+                return (
+                  <Card
+                    key={module.id}
+                    className={`transition-all duration-200 ${
+                      isDisabled
+                        ? "opacity-60"
+                        : "hover:shadow-md cursor-pointer"
+                    }`}
+                  >
+                    <CardHeader className="pb-3">
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-center gap-3">
+                          <div
+                            className={`p-2 rounded-lg ${
+                              module.status === "completed"
+                                ? "bg-brand-emerald/10"
+                                : module.status === "in_progress"
+                                ? "bg-brand-gold/10"
+                                : "bg-muted"
+                            }`}
+                          >
+                            <Icon
+                              className={`h-5 w-5 ${
+                                module.status === "completed"
+                                  ? "text-brand-emerald"
+                                  : module.status === "in_progress"
+                                  ? "text-brand-gold"
+                                  : "text-muted-foreground"
+                              }`}
+                            />
+                          </div>
+                          <div>
+                            <CardTitle className="text-base">
+                              {module.title}
+                            </CardTitle>
+                            <div className="flex items-center gap-2 mt-1 text-sm text-muted-foreground">
+                              <Clock className="h-3 w-3" />
+                              {module.duration} min
+                            </div>
+                          </div>
+                        </div>
+                        {getStatusBadge(module.status, module.progress)}
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <CardDescription>{module.description}</CardDescription>
+
+                      {module.status === "in_progress" && module.progress && (
+                        <Progress value={module.progress} className="h-2" />
+                      )}
+
+                      <Button
+                        asChild={!isDisabled}
+                        variant={
+                          module.status === "completed" ? "outline" : "default"
+                        }
+                        className={`w-full ${
+                          module.status === "in_progress"
+                            ? "bg-brand-gold hover:bg-brand-gold/90 text-brand-navy"
+                            : ""
+                        }`}
+                        disabled={isDisabled}
+                      >
+                        {isDisabled ? (
+                          <span>
+                            <Lock className="mr-2 h-4 w-4" />
+                            Complete previous modules
+                          </span>
+                        ) : (
+                          <Link href={`/training/${module.id}`}>
+                            {module.status === "completed" ? (
+                              <>
+                                Review Module
+                                <ArrowRight className="ml-2 h-4 w-4" />
+                              </>
+                            ) : module.status === "in_progress" ? (
+                              <>
+                                <Play className="mr-2 h-4 w-4" />
+                                Continue Learning
+                              </>
+                            ) : (
+                              <>
+                                Start Module
+                                <ArrowRight className="ml-2 h-4 w-4" />
+                              </>
+                            )}
+                          </Link>
+                        )}
+                      </Button>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          </TabsContent>
+        </Tabs>
+      </div>
+    </div>
+  );
+}
+

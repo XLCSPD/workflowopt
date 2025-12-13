@@ -1,0 +1,145 @@
+-- Seed Premier Health & Versatex Procurement Workflow
+-- Run after schema.sql
+
+-- Create a sample organization
+INSERT INTO organizations (id, name) VALUES
+('00000000-0000-0000-0000-000000000001', 'Versatex Solutions');
+
+-- Create the Premier Health Procurement Process
+INSERT INTO processes (id, org_id, name, description) VALUES
+('00000000-0000-0000-0000-000000000010', 
+ '00000000-0000-0000-0000-000000000001',
+ 'Premier Health & Versatex Procurement Workflow',
+ 'End-to-end procurement workflow between Premier Health, Versatex, and Merchants for medical supplies and equipment.');
+
+-- Insert Process Steps
+-- Premier Health Lane
+INSERT INTO process_steps (id, process_id, step_name, description, lane, step_type, order_index, position_x, position_y) VALUES
+('00000000-0000-0000-0000-000000000101',
+ '00000000-0000-0000-0000-000000000010',
+ 'Start: Project & Materials',
+ 'Premier Health has project and receives material list from Daris',
+ 'Premier Health', 'start', 1, 100, 80),
+
+('00000000-0000-0000-0000-000000000102',
+ '00000000-0000-0000-0000-000000000010',
+ 'Create QR in IPEX',
+ 'Premier Health creates Quote Request (QR) for items in IPEX system',
+ 'Premier Health', 'action', 2, 250, 80),
+
+('00000000-0000-0000-0000-000000000103',
+ '00000000-0000-0000-0000-000000000010',
+ 'Submit QR',
+ 'Premier Health submits QR for pricing',
+ 'Premier Health', 'action', 3, 400, 80),
+
+('00000000-0000-0000-0000-000000000104',
+ '00000000-0000-0000-0000-000000000010',
+ 'Select Merchant & Approve QR',
+ 'Premier Health makes merchant selection(s) and approves QR',
+ 'Premier Health', 'decision', 7, 700, 80),
+
+('00000000-0000-0000-0000-000000000105',
+ '00000000-0000-0000-0000-000000000010',
+ 'Receive Tracking Updates',
+ 'Premier Health receives shipping/tracking updates from Versatex',
+ 'Premier Health', 'action', 14, 1000, 80),
+
+('00000000-0000-0000-0000-000000000106',
+ '00000000-0000-0000-0000-000000000010',
+ 'Goods Receipt',
+ 'Premier Health completes Goods Receipt(s)',
+ 'Premier Health', 'action', 16, 1150, 80),
+
+('00000000-0000-0000-0000-000000000107',
+ '00000000-0000-0000-0000-000000000010',
+ 'Authorize PO Payment',
+ 'Premier Health authorizes PO payment to Versatex',
+ 'Premier Health', 'action', 17, 1300, 80),
+
+-- Versatex Lane
+('00000000-0000-0000-0000-000000000201',
+ '00000000-0000-0000-0000-000000000010',
+ 'Source Pricing',
+ 'Versatex sources pricing options from several merchants',
+ 'Versatex', 'action', 4, 250, 220),
+
+('00000000-0000-0000-0000-000000000202',
+ '00000000-0000-0000-0000-000000000010',
+ 'Send Options to Client',
+ 'Versatex sends to client for merchant selection(s) & approval',
+ 'Versatex', 'action', 5, 400, 220),
+
+('00000000-0000-0000-0000-000000000203',
+ '00000000-0000-0000-0000-000000000010',
+ 'Accounting Entry',
+ 'Versatex initiates accounting entry with Premier Health',
+ 'Versatex', 'action', 8, 550, 220),
+
+('00000000-0000-0000-0000-000000000204',
+ '00000000-0000-0000-0000-000000000010',
+ 'Send PO to Merchant',
+ 'Versatex sends PO(s) for order fulfillment',
+ 'Versatex', 'action', 9, 700, 220),
+
+('00000000-0000-0000-0000-000000000205',
+ '00000000-0000-0000-0000-000000000010',
+ 'Pay Merchant',
+ 'Versatex pays merchant(s)',
+ 'Versatex', 'action', 12, 850, 220),
+
+('00000000-0000-0000-0000-000000000206',
+ '00000000-0000-0000-0000-000000000010',
+ 'Receive Tracking',
+ 'Versatex receives shipping/tracking details from merchant(s)',
+ 'Versatex', 'action', 13, 1000, 220),
+
+('00000000-0000-0000-0000-000000000207',
+ '00000000-0000-0000-0000-000000000010',
+ 'Close PO',
+ 'Versatex closes PO(s)',
+ 'Versatex', 'end', 18, 1300, 220),
+
+-- Merchant Lane
+('00000000-0000-0000-0000-000000000301',
+ '00000000-0000-0000-0000-000000000010',
+ 'Accept PO',
+ 'Merchant accepts Versatex PO',
+ 'Merchant', 'action', 10, 700, 360),
+
+('00000000-0000-0000-0000-000000000302',
+ '00000000-0000-0000-0000-000000000010',
+ 'Ship Items',
+ 'Merchant ships ordered items',
+ 'Merchant', 'action', 11, 850, 360),
+
+('00000000-0000-0000-0000-000000000303',
+ '00000000-0000-0000-0000-000000000010',
+ 'Deliver to Client',
+ 'Merchant delivers orders to Premier Health',
+ 'Merchant', 'action', 15, 1150, 360);
+
+-- Insert Step Connections (Flow Arrows)
+INSERT INTO step_connections (process_id, source_step_id, target_step_id) VALUES
+-- Premier Health flow
+('00000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000101', '00000000-0000-0000-0000-000000000102'),
+('00000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000102', '00000000-0000-0000-0000-000000000103'),
+('00000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000103', '00000000-0000-0000-0000-000000000201'),
+('00000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000202', '00000000-0000-0000-0000-000000000104'),
+('00000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000105', '00000000-0000-0000-0000-000000000106'),
+('00000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000106', '00000000-0000-0000-0000-000000000107'),
+
+-- Versatex flow
+('00000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000201', '00000000-0000-0000-0000-000000000202'),
+('00000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000104', '00000000-0000-0000-0000-000000000203'),
+('00000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000203', '00000000-0000-0000-0000-000000000204'),
+('00000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000204', '00000000-0000-0000-0000-000000000301'),
+('00000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000302', '00000000-0000-0000-0000-000000000205'),
+('00000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000205', '00000000-0000-0000-0000-000000000206'),
+('00000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000206', '00000000-0000-0000-0000-000000000105'),
+('00000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000107', '00000000-0000-0000-0000-000000000207'),
+
+-- Merchant flow
+('00000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000301', '00000000-0000-0000-0000-000000000302'),
+('00000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000303', '00000000-0000-0000-0000-000000000106');
+
