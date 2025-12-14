@@ -4,17 +4,13 @@
   "regions": ["iad1"],
   "installCommand": "npm install",
   "buildCommand": "npm run build",
-  "env": {
-    "NEXT_PUBLIC_SUPABASE_URL": "@supabase-url",
-    "NEXT_PUBLIC_SUPABASE_ANON_KEY": "@supabase-anon-key"
-  },
   "headers": [
     {
       "source": "/(.*)",
       "headers": [
         {
           "key": "X-Robots-Tag",
-          "value": "index, follow"
+          "value": "noindex, nofollow"
         }
       ]
     }
