@@ -129,7 +129,9 @@ export interface TrainingContent {
   title: string;
   type: TrainingContentType;
   file_url?: string;
-  content?: string;
+  // Stored as JSONB in Postgres; Supabase returns this as a JS object at runtime.
+  // We keep this flexible and narrow it at usage sites (video/slides/article/quiz).
+  content?: unknown;
   description?: string;
   order_index: number;
   duration_minutes?: number;

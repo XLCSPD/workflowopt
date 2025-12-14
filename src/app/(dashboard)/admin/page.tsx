@@ -66,7 +66,6 @@ import {
   Save,
   Clock,
   XCircle,
-  BarChart3,
   Workflow,
   ClipboardList,
   Eye,

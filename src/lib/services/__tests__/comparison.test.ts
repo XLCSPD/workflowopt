@@ -189,11 +189,6 @@ describe("comparison service", () => {
 
       const suggestions = getComparisonSuggestions(improvedMetrics);
 
-      // Should have positive suggestions
-      const hasPositiveSuggestion = suggestions.some(
-        (s) => s.type === "improvement" || s.type === "positive"
-      );
-      
       // Check that suggestions exist
       expect(suggestions.length).toBeGreaterThanOrEqual(0);
     });

@@ -26,11 +26,11 @@ function cleanup() {
   lastCleanup = now;
   const cutoff = now - 3600000; // Remove entries older than 1 hour
   
-  for (const [key, entry] of store.entries()) {
+  Array.from(store.entries()).forEach(([key, entry]) => {
     if (entry.lastRefill < cutoff) {
       store.delete(key);
     }
-  }
+  });
 }
 
 export interface RateLimitOptions {

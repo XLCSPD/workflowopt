@@ -59,7 +59,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate all observations belong to accessible sessions
-    const sessionIds = [...new Set(observations.map((o) => o.session_id))];
+    const sessionIds = Array.from(new Set(observations.map((o) => o.session_id)));
     const { data: accessibleSessions } = await supabase
       .from("sessions")
       .select("id")

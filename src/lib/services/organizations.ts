@@ -130,7 +130,7 @@ export async function getOrganizationStats(orgId: string): Promise<OrganizationS
   let observationCount = 0;
 
   if (processes && processes.length > 0) {
-    const processIds = processes.map(p => p.id);
+    const processIds = processes.map((p: { id: string }) => p.id);
 
     const { count: sessions } = await supabase
       .from("sessions")
@@ -146,7 +146,7 @@ export async function getOrganizationStats(orgId: string): Promise<OrganizationS
       .in("process_id", processIds);
 
     if (sessionData && sessionData.length > 0) {
-      const sessionIds = sessionData.map(s => s.id);
+      const sessionIds = sessionData.map((s: { id: string }) => s.id);
       const { count: observations } = await supabase
         .from("observations")
         .select("*", { count: "exact", head: true })

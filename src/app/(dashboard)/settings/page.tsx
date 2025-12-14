@@ -56,6 +56,7 @@ export default function SettingsPage() {
   const [isSavingProfile, setIsSavingProfile] = useState(false);
 
   // Password state
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");

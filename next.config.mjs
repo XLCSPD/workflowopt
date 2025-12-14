@@ -83,6 +83,9 @@ const nextConfig = {
               "style-src 'self' 'unsafe-inline'",
               "img-src 'self' data: blob: https:",
               "font-src 'self' data:",
+              // Allow HTML5 video/audio from Supabase Storage (and other https sources)
+              // Without this, default-src 'self' blocks media and videos show 0:00 / 0:00.
+              "media-src 'self' blob: https:",
               `connect-src 'self' ${process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://*.supabase.co'} wss://*.supabase.co`,
               "frame-ancestors 'none'",
               "form-action 'self'",

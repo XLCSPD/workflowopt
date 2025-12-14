@@ -91,13 +91,10 @@ export default function WorkflowsPage() {
   }, [loadWorkflows]);
 
   // Handle import success
-  const handleImportSuccess = useCallback(
-    (processId: string) => {
-      // Refresh the workflows list
-      loadWorkflows();
-    },
-    [loadWorkflows]
-  );
+  const handleImportSuccess = useCallback(() => {
+    // Refresh the workflows list
+    loadWorkflows();
+  }, [loadWorkflows]);
 
   const filteredWorkflows = workflows.filter(
     (workflow) =>

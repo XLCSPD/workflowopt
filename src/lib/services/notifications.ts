@@ -292,8 +292,8 @@ export function subscribeToNotifications(
         table: "notifications",
         filter: `user_id=eq.${userId}`,
       },
-      (payload) => {
-        onNotification(payload.new as Notification);
+      (payload: { new: Record<string, unknown> }) => {
+        onNotification(payload.new as unknown as Notification);
       }
     )
     .subscribe();
@@ -362,8 +362,8 @@ export async function notifySessionParticipants(
   if (!participants || participants.length === 0) return;
 
   const notifications = participants
-    .filter((p) => p.user_id !== excludeUserId)
-    .map((p) => ({
+    .filter((p: { user_id: string }) => p.user_id !== excludeUserId)
+    .map((p: { user_id: string }) => ({
       user_id: p.user_id,
       title,
       message,

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Bell, Search, HelpCircle, Check, CheckCheck, Trash2, Loader2 } from "lucide-react";
+import { Bell, Search, HelpCircle, CheckCheck, Trash2, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {

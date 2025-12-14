@@ -142,7 +142,8 @@ export async function generateLocalInsights(
   }
 
   // Transform data
-  const transformedObs: ObservationData[] = observations.map((obs) => ({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const transformedObs: ObservationData[] = observations.map((obs: any) => ({
     id: obs.id,
     notes: obs.notes,
     is_digital: obs.is_digital,
@@ -171,7 +172,7 @@ export async function generateLocalInsights(
     });
   });
 
-  const topWasteType = [...wasteTypeCounts.entries()]
+  const topWasteType = Array.from(wasteTypeCounts.entries())
     .sort((a, b) => b[1] - a[1])[0]?.[0] || "N/A";
 
   // Determine improvement potential
@@ -257,7 +258,7 @@ function generateRecommendationsFromData(
   }
 
   // Top waste type recommendation
-  const topWasteEntries = [...wasteTypeCounts.entries()]
+  const topWasteEntries = Array.from(wasteTypeCounts.entries())
     .sort((a, b) => b[1] - a[1])
     .slice(0, 3);
 
@@ -351,7 +352,7 @@ function generateKeyFindings(
   }
 
   // Top waste types
-  const topWastes = [...wasteTypeCounts.entries()]
+  const topWastes = Array.from(wasteTypeCounts.entries())
     .sort((a, b) => b[1] - a[1])
     .slice(0, 3);
   if (topWastes.length > 0) {
@@ -366,7 +367,7 @@ function generateKeyFindings(
       laneCounts.set(obs.step.lane, (laneCounts.get(obs.step.lane) || 0) + 1);
     }
   });
-  const topLanes = [...laneCounts.entries()]
+  const topLanes = Array.from(laneCounts.entries())
     .sort((a, b) => b[1] - a[1])
     .slice(0, 2);
   if (topLanes.length > 0) {
@@ -405,7 +406,7 @@ function identifyRiskAreas(observations: ObservationData[]): string[] {
       );
     }
   });
-  const problematicSteps = [...stepCounts.entries()].filter(([, c]) => c >= 3);
+  const problematicSteps = Array.from(stepCounts.entries()).filter(([, c]) => c >= 3);
   if (problematicSteps.length > 0) {
     risks.push(
       `${problematicSteps.length} step(s) have 3+ waste observations and may be process bottlenecks.`

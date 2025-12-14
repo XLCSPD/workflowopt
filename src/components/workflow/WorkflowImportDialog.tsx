@@ -40,10 +40,7 @@ import {
   importWorkflow,
   generateSampleJSON,
   generateSampleCSV,
-  type WorkflowImportData,
   type ImportValidationResult,
-  type ImportError,
-  type ImportWarning,
 } from "@/lib/services/workflowImport";
 
 interface WorkflowImportDialogProps {

@@ -3,7 +3,6 @@
 import { useMemo, useEffect, useCallback, useRef, useState } from "react";
 import ReactFlow, {
   Background,
-  Controls,
   MiniMap,
   useNodesState,
   useEdgesState,
@@ -24,7 +23,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { Flame, LayoutGrid, RotateCcw, Lock } from "lucide-react";
+import { Flame, LayoutGrid, RotateCcw, Lock, ZoomIn, ZoomOut } from "lucide-react";
 import type { ProcessStep } from "@/types";
 
 const nodeTypes = {
@@ -142,7 +141,7 @@ function ProcessMapInner({
   onConnect,
   onDeleteConnection,
 }: ProcessMapProps) {
-  const { fitView } = useReactFlow();
+  const { fitView, zoomIn, zoomOut } = useReactFlow();
   const viewport = useViewport();
   
   // Use ref to avoid recreating nodes when onStepClick changes
@@ -466,7 +465,6 @@ function ProcessMapInner({
           } : undefined}
         >
           <Background color="#e5e7eb" gap={20} />
-          <Controls showInteractive={false} />
           <MiniMap
             nodeColor={(node) => {
               const intensity = node.data?.heatmapIntensity;
@@ -495,6 +493,26 @@ function ProcessMapInner({
             >
               <LayoutGrid className="h-4 w-4 mr-2" />
               Auto Layout
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => zoomOut()}
+              className="bg-white shadow-sm"
+              title="Zoom out"
+              aria-label="Zoom out"
+            >
+              <ZoomOut className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => zoomIn()}
+              className="bg-white shadow-sm"
+              title="Zoom in"
+              aria-label="Zoom in"
+            >
+              <ZoomIn className="h-4 w-4" />
             </Button>
             {hasLayoutSaved && (
               <Button

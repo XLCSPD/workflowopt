@@ -6,14 +6,14 @@ import { Toaster } from "@/components/ui/toaster";
 import { PWAProvider } from "@/components/pwa/PWAProvider";
 
 export const metadata: Metadata = {
-  title: "Process Optimization Platform",
+  title: "Versatex Process Optimization Platform",
   description: "Identify and eliminate waste in your digital workflows with Lean methodology",
   keywords: ["lean", "process optimization", "waste identification", "workflow", "continuous improvement"],
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "ProcessOpt",
+    title: "Versatex ProcessOpt",
   },
   formatDetection: {
     telephone: false,
@@ -36,9 +36,9 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        <link rel="icon" type="image/svg+xml" href="/icons/icon.svg" />
-        <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
-        <link rel="apple-touch-icon" href="/icons/icon.svg" />
+        <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png" />
+        <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png" />
+        <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
       </head>

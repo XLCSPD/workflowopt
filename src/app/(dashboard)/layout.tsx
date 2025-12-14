@@ -8,6 +8,7 @@ import { useAuthStore } from "@/lib/stores/authStore";
 import { getSupabaseClient } from "@/lib/supabase/client";
 import { Loader2 } from "lucide-react";
 import type { User } from "@/types";
+import { VersatexLogo } from "@/components/branding/VersatexLogo";
 
 export default function DashboardLayout({
   children,
@@ -94,9 +95,7 @@ export default function DashboardLayout({
         <header className="md:hidden flex items-center h-14 px-4 border-b bg-white">
           <MobileSidebarTrigger />
           <Link href="/dashboard" className="flex items-center gap-2 ml-3">
-            <div className="w-7 h-7 rounded-lg bg-brand-gold flex items-center justify-center">
-              <span className="text-xs font-bold text-brand-navy">PO</span>
-            </div>
+            <VersatexLogo variant="sidebar" priority className="w-7 h-7 rounded-lg" />
             <span className="font-semibold text-brand-navy text-sm">ProcessOpt</span>
           </Link>
         </header>

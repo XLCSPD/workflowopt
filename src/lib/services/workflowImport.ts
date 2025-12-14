@@ -444,7 +444,7 @@ export function parseCSV(
   const data: WorkflowImportData = {
     name: workflowName,
     description: `Imported from CSV with ${steps.length} steps`,
-    lanes: [...new Set(steps.map((s) => s.lane))],
+    lanes: Array.from(new Set(steps.map((s) => s.lane))),
     steps,
     connections,
   };
@@ -496,7 +496,7 @@ export async function importWorkflow(
 
     // Calculate positions for steps
     const laneIndices = new Map<string, number>();
-    const lanes = data.lanes || [...new Set(data.steps.map((s) => s.lane))];
+    const lanes = data.lanes || Array.from(new Set(data.steps.map((s) => s.lane)));
     lanes.forEach((lane, idx) => laneIndices.set(lane, idx));
 
     const LANE_HEIGHT = 120;
@@ -711,9 +711,6 @@ export function parsePremierHealthCSV(
   const headers = parseCSVLine(lines[0]).map((h) => h.toLowerCase().trim());
 
   // Check for Premier Health format
-  const hasStep =
-    headers.includes("step") ||
-    headers.some((h) => h.includes("step") && !h.includes("process"));
   const hasOwner = headers.includes("owner");
   const hasAction =
     headers.includes("action / process step") ||
@@ -814,7 +811,7 @@ export function parsePremierHealthCSV(
     });
   }
 
-  const lanes = [...new Set(steps.map((s) => s.lane))];
+  const lanes = Array.from(new Set(steps.map((s) => s.lane)));
 
   const data: WorkflowImportData = {
     name: workflowName,

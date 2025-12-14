@@ -9,6 +9,7 @@ import { z } from "zod";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { VersatexLogo } from "@/components/branding/VersatexLogo";
 import {
   Card,
   CardContent,
@@ -104,9 +105,7 @@ export default function RegisterPage() {
       <Card className="w-full max-w-md relative z-10 shadow-xl border-0 bg-white/80 backdrop-blur-sm">
         <CardHeader className="space-y-4 text-center pb-2">
           <div className="flex justify-center">
-            <div className="w-16 h-16 rounded-xl bg-brand-gold flex items-center justify-center shadow-lg">
-              <span className="text-2xl font-bold text-brand-navy">PO</span>
-            </div>
+            <VersatexLogo variant="auth" priority />
           </div>
           <div>
             <CardTitle className="text-2xl font-bold text-brand-navy">

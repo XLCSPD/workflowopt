@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { Header } from "@/components/layout/Header";
@@ -36,11 +36,13 @@ import {
   Target,
   Lightbulb,
   AlertTriangle,
+  Loader2,
   type LucideIcon,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { markTrainingComplete } from "@/lib/services/training";
+import { markTrainingComplete, getTrainingContentById } from "@/lib/services/training";
+import type { TrainingContent } from "@/types";
 
 // Supabase Storage URL
 const SUPABASE_STORAGE_URL = "https://rnmgqwsujxqvsdlfdscw.supabase.co/storage/v1/object/public";
@@ -402,7 +404,81 @@ export default function TrainingDetailPage() {
   const router = useRouter();
   const { toast } = useToast();
   const moduleId = params.id as string;
-  const trainingModule = trainingData[moduleId as keyof typeof trainingData];
+
+  // Database content state
+  const [dbContent, setDbContent] = useState<TrainingContent | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Fetch content from database
+  useEffect(() => {
+    const loadContent = async () => {
+      try {
+        setIsLoading(true);
+        const content = await getTrainingContentById(moduleId);
+        setDbContent(content);
+      } catch (error) {
+        console.error("Failed to load training content:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    loadContent();
+  }, [moduleId]);
+
+  // Merge database content with hardcoded data for complex slides
+  const trainingModule = useMemo(() => {
+    if (!dbContent) return null;
+    
+    // For slides with complex layouts (module 2), use hardcoded slide content
+    // but use database for title and other metadata
+    // NOTE: training routes now use Supabase UUID ids, while `trainingData` is keyed by
+    // legacy numeric ids ("1", "2", ...). Match by title/type to find the rich deck.
+    const hardcodedData =
+      trainingData[moduleId as keyof typeof trainingData] ??
+      (Object.values(trainingData).find(
+        (m) => m.title === dbContent.title && m.type === dbContent.type
+      ) as (typeof trainingData)[keyof typeof trainingData] | undefined);
+
+    if (dbContent.type === "slides" && hardcodedData?.type === "slides") {
+      return {
+        id: dbContent.id,
+        title: dbContent.title,
+        type: dbContent.type,
+        content: hardcodedData.content, // Use hardcoded complex slides
+      };
+    }
+    
+    // For video, article, quiz - use database content
+    // Normalize JSONB content (Supabase returns object, but keep a safe fallback)
+    let content: unknown = dbContent.content;
+    if (typeof content === "string") {
+      try {
+        content = JSON.parse(content);
+      } catch {
+        // leave as-is
+      }
+    }
+    
+    // Handle video URLs - convert relative paths to full Supabase Storage URLs
+    if (dbContent.type === "video" && typeof content === "object" && content !== null) {
+      const videoContent = { ...(content as { videoUrl?: string; transcript?: string }) };
+      if (videoContent.videoUrl && !videoContent.videoUrl.startsWith("http")) {
+        // Convert relative path to full Supabase Storage URL
+        const relativePath = videoContent.videoUrl.startsWith("/") 
+          ? videoContent.videoUrl.slice(1) 
+          : videoContent.videoUrl;
+        videoContent.videoUrl = `${SUPABASE_STORAGE_URL}/${relativePath}`;
+      }
+      content = videoContent;
+    }
+    
+    return {
+      id: dbContent.id,
+      title: dbContent.title,
+      type: dbContent.type,
+      content,
+    };
+  }, [dbContent, moduleId]);
 
   // Video state
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -412,6 +488,7 @@ export default function TrainingDetailPage() {
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(1);
   const [isVideoEnded, setIsVideoEnded] = useState(false);
+  const [videoLoadError, setVideoLoadError] = useState<string | null>(null);
 
   // Slides state
   const [currentSlide, setCurrentSlide] = useState(0);
@@ -421,7 +498,7 @@ export default function TrainingDetailPage() {
 
   // Get total slides for progress calculation
   const slidesForProgress = trainingModule?.type === "slides" 
-    ? (trainingModule.content as { slides: EnhancedSlide[] }).slides 
+    ? ((trainingModule.content as unknown) as { slides: EnhancedSlide[] }).slides 
     : [];
   const totalSlidesForProgress = slidesForProgress.length;
 
@@ -482,14 +559,31 @@ export default function TrainingDetailPage() {
     };
   }, [trainingModule?.type]);
 
-  const togglePlay = () => {
+  const togglePlay = async () => {
     const video = videoRef.current;
     if (!video) return;
 
     if (isPlaying) {
       video.pause();
     } else {
-      video.play();
+      try {
+        setVideoLoadError(null);
+        await video.play();
+      } catch (err) {
+        console.error("Video play failed:", err, {
+          src: video.currentSrc || video.src,
+          error: video.error,
+          readyState: video.readyState,
+          networkState: video.networkState,
+        });
+        setVideoLoadError("Video failed to start. Please try again.");
+        toast({
+          variant: "destructive",
+          title: "Video error",
+          description:
+            "The video couldn't start. This is usually a loading/format issue—try Refresh. If it persists, we can inspect the exact browser error code.",
+        });
+      }
     }
   };
 
@@ -536,8 +630,20 @@ export default function TrainingDetailPage() {
 
     video.currentTime = 0;
     setIsVideoEnded(false);
-    video.play();
+    void togglePlay();
   };
+
+  // Loading state
+  if (isLoading) {
+    return (
+      <div className="flex flex-col h-full">
+        <Header title="Loading..." />
+        <div className="flex-1 flex items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-brand-gold" />
+        </div>
+      </div>
+    );
+  }
 
   if (!trainingModule) {
     return (
@@ -560,10 +666,10 @@ export default function TrainingDetailPage() {
   }
 
   const slides = trainingModule.type === "slides" 
-    ? (trainingModule.content as { slides: EnhancedSlide[] }).slides 
+    ? ((trainingModule.content as unknown) as { slides: EnhancedSlide[] }).slides 
     : [];
   const questions = trainingModule.type === "quiz" 
-    ? (trainingModule.content as { questions: { id: string; text: string; options: string[]; correct: string }[] }).questions 
+    ? ((trainingModule.content as unknown) as { questions: { id: string; text: string; options: string[]; correct: string }[] }).questions 
     : [];
   const totalSlides = slides.length;
   const progress = trainingModule.type === "slides" ? ((currentSlide + 1) / totalSlides) * 100 : 0;
@@ -641,10 +747,28 @@ export default function TrainingDetailPage() {
                 {/* Video Element */}
                 <video
                   ref={videoRef}
-                  src={(trainingModule.content as { videoUrl: string }).videoUrl}
+                  src={((trainingModule.content as unknown) as { videoUrl: string }).videoUrl}
                   className="w-full h-full object-contain"
                   playsInline
+                  preload="metadata"
+                  crossOrigin="anonymous"
                   onClick={togglePlay}
+                  onError={() => {
+                    const video = videoRef.current;
+                    console.error("Video element error:", {
+                      src: video?.currentSrc || video?.src,
+                      error: video?.error,
+                      readyState: video?.readyState,
+                      networkState: video?.networkState,
+                    });
+                    setVideoLoadError("Video failed to load.");
+                    toast({
+                      variant: "destructive",
+                      title: "Video failed to load",
+                      description:
+                        "We couldn't load the video stream. This is usually a URL/permission/codec issue.",
+                    });
+                  }}
                 />
 
                 {/* Play overlay when paused/ended */}
@@ -665,6 +789,24 @@ export default function TrainingDetailPage() {
 
                 {/* Video Controls - show on hover or when paused */}
                 <div className={`absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/60 to-transparent p-4 pt-12 transition-opacity duration-300 ${isPlaying ? 'opacity-0 group-hover:opacity-100' : 'opacity-100'}`}>
+                  {videoLoadError && (
+                    <div className="mb-3 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+                      {videoLoadError}{" "}
+                      <button
+                        type="button"
+                        className="underline underline-offset-2"
+                        onClick={() => {
+                          const video = videoRef.current;
+                          if (video) {
+                            // force reload
+                            video.load();
+                          }
+                        }}
+                      >
+                        Retry
+                      </button>
+                    </div>
+                  )}
                   {/* Progress bar */}
                   <div className="mb-3">
                     <Slider
@@ -749,7 +891,7 @@ export default function TrainingDetailPage() {
                   )}
                 </div>
                 <p className="text-muted-foreground leading-relaxed">
-                  {(trainingModule.content as { transcript: string }).transcript}
+                  {((trainingModule.content as unknown) as { transcript: string }).transcript}
                 </p>
               </div>
             </CardContent>
@@ -1018,7 +1160,7 @@ export default function TrainingDetailPage() {
             <CardContent className="pt-6 prose prose-gray max-w-none">
               <div
                 dangerouslySetInnerHTML={{
-                  __html: (trainingModule.content as { body: string }).body.replace(/\n/g, "<br />"),
+                  __html: ((trainingModule.content as unknown) as { body: string }).body.replace(/\n/g, "<br />"),
                 }}
               />
               <div className="mt-8 pt-6 border-t">

@@ -142,10 +142,14 @@ export async function POST(request: NextRequest) {
       frequency_score: obs.frequency_score,
       impact_score: obs.impact_score,
       ease_score: obs.ease_score,
-      step: obs.step as { step_name: string; lane: string } | null,
+      step: Array.isArray(obs.step) ? (obs.step[0] as { step_name: string; lane: string } | undefined) || null : (obs.step as { step_name: string; lane: string } | null),
       waste_types:
-        (obs.observation_waste_links as Array<{ waste_type: WasteType | null }>)
-          ?.map((link) => link.waste_type)
+        (obs.observation_waste_links as unknown as Array<{ waste_type: WasteType | WasteType[] | null }>)
+          ?.map((link) => {
+            const wt = link.waste_type;
+            if (Array.isArray(wt)) return wt[0] || null;
+            return wt;
+          })
           .filter((wt): wt is WasteType => wt !== null) || [],
     }));
 
@@ -398,7 +402,7 @@ function generateSummary(observations: Observation[]): {
   });
 
   const topWasteType =
-    [...wasteTypeCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || "N/A";
+    Array.from(wasteTypeCounts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] || "N/A";
 
   let improvementPotential: "high" | "medium" | "low" = "low";
   if (avgPriority > 30 || totalObs > 20) {
@@ -504,7 +508,7 @@ function generateLocalInsights(
   );
 
   if (wasteTypeCounts.size > 0) {
-    const topWastes = [...wasteTypeCounts.entries()]
+    const topWastes = Array.from(wasteTypeCounts.entries())
       .sort((a, b) => b[1] - a[1])
       .slice(0, 3);
     keyFindings.push(

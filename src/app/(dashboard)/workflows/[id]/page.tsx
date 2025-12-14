@@ -31,6 +31,9 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -47,6 +50,7 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { getWorkflowWithDetails } from "@/lib/services/workflows";
+import { exportWorkflowToPDF } from "@/lib/services/export";
 import {
   createStep,
   updateStep,
@@ -394,6 +398,160 @@ export default function WorkflowDetailPage() {
     }
   };
 
+  function sanitizeFilenamePart(value: string): string {
+    return value
+      .trim()
+      .replace(/[^\w\-]+/g, "_")
+      .replace(/_+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, 80);
+  }
+
+  function downloadTextFile(filename: string, text: string, mimeType: string) {
+    const blob = new Blob([text], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function csvEscape(value: unknown): string {
+    if (value === null || value === undefined) return "";
+    const s = String(value);
+    // Escape double-quotes and wrap values containing special chars
+    if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+    return s;
+  }
+
+  const handleExportJson = useCallback(() => {
+    if (!workflow) return;
+
+    try {
+      const safeName = sanitizeFilenamePart(workflow.name || "workflow") || "workflow";
+      const payload = {
+        exportedAt: new Date().toISOString(),
+        workflow,
+        steps,
+        connections,
+      };
+      downloadTextFile(
+        `${safeName}.json`,
+        JSON.stringify(payload, null, 2),
+        "application/json;charset=utf-8"
+      );
+      toast({ title: "Export started", description: "Downloaded workflow JSON." });
+    } catch (error) {
+      console.error("Failed to export JSON:", error);
+      toast({
+        variant: "destructive",
+        title: "Export failed",
+        description: "Could not export workflow as JSON.",
+      });
+    }
+  }, [workflow, steps, connections, toast]);
+
+  const handleExportStepsCsv = useCallback(() => {
+    if (!workflow) return;
+
+    try {
+      const safeName = sanitizeFilenamePart(workflow.name || "workflow") || "workflow";
+      const header = [
+        "id",
+        "process_id",
+        "step_name",
+        "description",
+        "lane",
+        "step_type",
+        "order_index",
+        "lead_time_minutes",
+        "cycle_time_minutes",
+        "position_x",
+        "position_y",
+        "created_at",
+        "updated_at",
+      ];
+
+      const rows = steps.map((s) =>
+        [
+          s.id,
+          s.process_id,
+          s.step_name,
+          s.description ?? "",
+          s.lane,
+          s.step_type,
+          s.order_index,
+          s.lead_time_minutes ?? "",
+          s.cycle_time_minutes ?? "",
+          s.position_x ?? "",
+          s.position_y ?? "",
+          s.created_at,
+          s.updated_at,
+        ]
+          .map(csvEscape)
+          .join(",")
+      );
+
+      const csv = [header.join(","), ...rows].join("\n");
+      downloadTextFile(`${safeName}_steps.csv`, csv, "text/csv;charset=utf-8");
+      toast({ title: "Export started", description: "Downloaded steps CSV." });
+    } catch (error) {
+      console.error("Failed to export steps CSV:", error);
+      toast({
+        variant: "destructive",
+        title: "Export failed",
+        description: "Could not export workflow steps as CSV.",
+      });
+    }
+  }, [workflow, steps, toast]);
+
+  const handleExportConnectionsCsv = useCallback(() => {
+    if (!workflow) return;
+
+    try {
+      const safeName = sanitizeFilenamePart(workflow.name || "workflow") || "workflow";
+      const header = ["id", "source", "target"];
+      const rows = connections.map((c) =>
+        [c.id ?? "", c.source, c.target].map(csvEscape).join(",")
+      );
+      const csv = [header.join(","), ...rows].join("\n");
+      downloadTextFile(`${safeName}_connections.csv`, csv, "text/csv;charset=utf-8");
+      toast({ title: "Export started", description: "Downloaded connections CSV." });
+    } catch (error) {
+      console.error("Failed to export connections CSV:", error);
+      toast({
+        variant: "destructive",
+        title: "Export failed",
+        description: "Could not export workflow connections as CSV.",
+      });
+    }
+  }, [workflow, connections, toast]);
+
+  const handleExportPdf = useCallback(async () => {
+    if (!workflow) return;
+
+    try {
+      toast({ title: "Preparing PDF…", description: "This can take a moment." });
+      await exportWorkflowToPDF({
+        workflow: { id: workflow.id, name: workflow.name },
+        steps,
+        connections,
+        filename: `${sanitizeFilenamePart(workflow.name || "workflow") || "workflow"}.pdf`,
+        chartElementId: "workflow-process-map-export",
+      });
+    } catch (error) {
+      console.error("Failed to export PDF:", error);
+      toast({
+        variant: "destructive",
+        title: "Export failed",
+        description: "Could not export workflow as PDF.",
+      });
+    }
+  }, [workflow, steps, connections, toast]);
+
   const resetStepForm = () => {
     setStepForm({
       name: "",
@@ -495,10 +653,26 @@ export default function WorkflowDetailPage() {
                   <Share2 className="mr-2 h-4 w-4" />
                   Share
                 </DropdownMenuItem>
-                <DropdownMenuItem>
-                  <Download className="mr-2 h-4 w-4" />
-                  Export
-                </DropdownMenuItem>
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger>
+                    <Download className="mr-2 h-4 w-4" />
+                    Export
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent>
+                    <DropdownMenuItem onSelect={handleExportJson}>
+                      Download JSON
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={handleExportPdf}>
+                      Download PDF
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={handleExportStepsCsv}>
+                      Download Steps CSV
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={handleExportConnectionsCsv}>
+                      Download Connections CSV
+                    </DropdownMenuItem>
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   className="text-destructive"
@@ -552,7 +726,7 @@ export default function WorkflowDetailPage() {
       </div>
 
       {/* Process Map */}
-      <div className="flex-1">
+      <div className="flex-1" id="workflow-process-map-export">
         {steps.length > 0 ? (
         <ProcessMap
           workflowId={params.id as string}

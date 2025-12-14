@@ -242,7 +242,7 @@ describe("import data transformation", () => {
         { lane: "User", order_index: 2 },
       ];
 
-      const lanes = [...new Set(steps.map((s) => s.lane))];
+      const lanes = Array.from(new Set(steps.map((s) => s.lane)));
       expect(lanes).toContain("User");
       expect(lanes).toContain("System");
       expect(lanes.length).toBe(2);
@@ -264,8 +264,6 @@ describe("import data transformation", () => {
     });
 
     it("should handle single step workflows", () => {
-      const stepIds = ["step-1"];
-
       // Single step should have no connections
       const connections: Array<{ from: string; to: string }> = [];
       expect(connections.length).toBe(0);

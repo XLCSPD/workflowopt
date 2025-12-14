@@ -145,14 +145,14 @@ export async function POST(request: NextRequest) {
         ease_score: obs.ease_score,
         priority_score: obs.priority_score,
         created_at: obs.created_at,
-        user: obs.user as User | null,
+        user: Array.isArray(obs.user) ? (obs.user[0] as User | undefined) || null : (obs.user as User | null),
         waste_types:
-          (
-            obs.observation_waste_links as Array<{
-              waste_type: WasteType | null;
-            }>
-          )
-            ?.map((link) => link.waste_type)
+          (obs.observation_waste_links as unknown as Array<{ waste_type: WasteType | WasteType[] | null }>)
+            ?.map((link) => {
+              const wt = link.waste_type;
+              if (Array.isArray(wt)) return wt[0] || null;
+              return wt;
+            })
             .filter((wt): wt is WasteType => wt !== null) || [],
       })
     );

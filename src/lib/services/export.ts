@@ -236,6 +236,226 @@ export async function exportToPDF(
 }
 
 // ============================================
+// WORKFLOW PDF EXPORT
+// ============================================
+
+export interface WorkflowExportWorkflow {
+  id: string;
+  name: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface WorkflowExportStep {
+  id: string;
+  process_id?: string;
+  step_name: string;
+  description?: string | null;
+  lane: string;
+  step_type: string;
+  order_index: number;
+  lead_time_minutes?: number | null;
+  cycle_time_minutes?: number | null;
+  position_x?: number | null;
+  position_y?: number | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface WorkflowExportConnection {
+  id?: string;
+  source: string;
+  target: string;
+}
+
+function safePdfFilename(value: string): string {
+  const base =
+    value
+      .trim()
+      .replace(/[^\w\-]+/g, "_")
+      .replace(/_+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, 80) || "workflow";
+  return base.endsWith(".pdf") ? base : `${base}.pdf`;
+}
+
+export async function exportWorkflowToPDF(args: {
+  workflow: WorkflowExportWorkflow;
+  steps: WorkflowExportStep[];
+  connections: WorkflowExportConnection[];
+  filename?: string;
+  chartElementId?: string;
+}): Promise<void> {
+  const { workflow, steps, connections, filename, chartElementId } = args;
+
+  // Dynamic imports to avoid bundling issues
+  const jsPDFModule = await import("jspdf");
+  const jsPDF = jsPDFModule.default;
+  const autoTableModule = await import("jspdf-autotable");
+  const autoTable = autoTableModule.default;
+
+  const doc = new jsPDF();
+  // Ensure autoTable is attached
+  void autoTable;
+
+  // Brand colors
+  const brandGold = [255, 192, 0] as [number, number, number];
+  const brandNavy = [16, 42, 67] as [number, number, number];
+
+  let yPosition = 20;
+
+  doc.setFontSize(22);
+  doc.setTextColor(...brandNavy);
+  doc.text("Workflow Export", 20, yPosition);
+  yPosition += 10;
+
+  doc.setFontSize(12);
+  doc.setTextColor(100, 100, 100);
+  doc.text(`Workflow: ${workflow.name}`, 20, yPosition);
+  yPosition += 6;
+  doc.text(`Workflow ID: ${workflow.id}`, 20, yPosition);
+  yPosition += 6;
+  doc.text(`Generated: ${new Date().toLocaleString()}`, 20, yPosition);
+  yPosition += 10;
+
+  // Optional: process map snapshot
+  if (chartElementId) {
+    const img = await captureChartAsImage(chartElementId);
+    if (img) {
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const margin = 15;
+      const maxW = pageWidth - margin * 2;
+      const maxH = pageHeight - yPosition - 20;
+
+      // Maintain aspect ratio using an assumed 16:9-ish canvas; html2canvas gives exact pixels,
+      // but jsPDF needs points/mm; using a conservative fit avoids cropping.
+      const h = Math.min(maxH, (maxW * 9) / 16);
+
+      doc.setDrawColor(230, 230, 230);
+      doc.rect(margin, yPosition, maxW, h);
+      doc.addImage(img, "PNG", margin, yPosition, maxW, h);
+      yPosition += h + 12;
+    }
+  }
+
+  // Summary
+  doc.setFontSize(16);
+  doc.setTextColor(...brandNavy);
+  doc.text("Summary", 20, yPosition);
+  yPosition += 8;
+
+  const laneCounts = steps.reduce<Record<string, number>>((acc, s) => {
+    acc[s.lane] = (acc[s.lane] || 0) + 1;
+    return acc;
+  }, {});
+
+  doc.setFontSize(11);
+  doc.setTextColor(60, 60, 60);
+  doc.text(`Steps: ${steps.length}`, 20, yPosition);
+  yPosition += 6;
+  doc.text(`Connections: ${connections.length}`, 20, yPosition);
+  yPosition += 6;
+  doc.text(
+    `Lanes: ${Object.keys(laneCounts).length > 0 ? Object.keys(laneCounts).join(", ") : "N/A"}`,
+    20,
+    yPosition
+  );
+  yPosition += 12;
+
+  // Steps table
+  doc.setFontSize(16);
+  doc.setTextColor(...brandNavy);
+  doc.text("Steps", 20, yPosition);
+  yPosition += 8;
+
+  autoTable(doc, {
+    startY: yPosition,
+    head: [
+      [
+        "Order",
+        "Step",
+        "Lane",
+        "Type",
+        "Lead (min)",
+        "Cycle (min)",
+        "Description",
+      ],
+    ],
+    body: [...steps]
+      .sort((a, b) => (a.order_index || 0) - (b.order_index || 0))
+      .map((s) => [
+        String(s.order_index ?? ""),
+        s.step_name,
+        s.lane,
+        s.step_type,
+        s.lead_time_minutes != null ? String(s.lead_time_minutes) : "",
+        s.cycle_time_minutes != null ? String(s.cycle_time_minutes) : "",
+        (s.description || "").slice(0, 60) + ((s.description?.length || 0) > 60 ? "..." : ""),
+      ]),
+    headStyles: {
+      fillColor: brandGold,
+      textColor: brandNavy,
+      fontStyle: "bold",
+    },
+    alternateRowStyles: { fillColor: [245, 245, 245] },
+    columnStyles: {
+      6: { cellWidth: 60 },
+    },
+  });
+
+  yPosition =
+    (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 12;
+
+  // Connections table
+  if (yPosition > 200) {
+    doc.addPage();
+    yPosition = 20;
+  }
+
+  const stepNameById = steps.reduce<Record<string, string>>((acc, s) => {
+    acc[s.id] = s.step_name;
+    return acc;
+  }, {});
+
+  doc.setFontSize(16);
+  doc.setTextColor(...brandNavy);
+  doc.text("Connections", 20, yPosition);
+  yPosition += 8;
+
+  autoTable(doc, {
+    startY: yPosition,
+    head: [["From", "To"]],
+    body: connections.map((c) => [
+      stepNameById[c.source] || c.source,
+      stepNameById[c.target] || c.target,
+    ]),
+    headStyles: {
+      fillColor: brandGold,
+      textColor: brandNavy,
+      fontStyle: "bold",
+    },
+    alternateRowStyles: { fillColor: [245, 245, 245] },
+  });
+
+  // Footer
+  const pageCount = doc.getNumberOfPages();
+  for (let i = 1; i <= pageCount; i++) {
+    doc.setPage(i);
+    doc.setFontSize(9);
+    doc.setTextColor(150, 150, 150);
+    doc.text(
+      `Page ${i} of ${pageCount} | Generated ${new Date().toLocaleDateString()}`,
+      doc.internal.pageSize.getWidth() / 2,
+      doc.internal.pageSize.getHeight() - 10,
+      { align: "center" }
+    );
+  }
+
+  doc.save(safePdfFilename(filename || workflow.name));
+}
+
+// ============================================
 // PPTX EXPORT (via server-side API)
 // ============================================
 

@@ -37,6 +37,7 @@ import { useState, useEffect } from "react";
 import { getSupabaseClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/lib/stores/authStore";
+import { VersatexLogo } from "@/components/branding/VersatexLogo";
 
 const navItems = [
   {
@@ -129,9 +130,7 @@ function MobileSidebarContent({ onClose }: { onClose: () => void }) {
           className="flex items-center gap-2"
           onClick={handleNavClick}
         >
-          <div className="w-8 h-8 rounded-lg bg-brand-gold flex items-center justify-center">
-            <span className="text-sm font-bold text-brand-navy">PO</span>
-          </div>
+          <VersatexLogo variant="sidebar" priority />
           <span className="font-semibold text-brand-navy">ProcessOpt</span>
         </Link>
         <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onClose}>
@@ -321,14 +320,13 @@ export function Sidebar() {
       >
         {/* Logo */}
         <div className="flex items-center justify-between h-16 px-4 border-b border-border">
-          {!isCollapsed && (
-            <Link href="/dashboard" className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-brand-gold flex items-center justify-center">
-                <span className="text-sm font-bold text-brand-navy">PO</span>
-              </div>
-              <span className="font-semibold text-brand-navy">ProcessOpt</span>
-            </Link>
-          )}
+          <Link
+            href="/dashboard"
+            className={cn("flex items-center gap-2", isCollapsed && "justify-center w-full")}
+          >
+            <VersatexLogo variant="sidebar" priority />
+            {!isCollapsed && <span className="font-semibold text-brand-navy">ProcessOpt</span>}
+          </Link>
           <Button
             variant="ghost"
             size="icon"
