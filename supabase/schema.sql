@@ -167,6 +167,38 @@ CREATE TABLE training_progress (
     UNIQUE(user_id, content_id)
 );
 
+-- Notifications
+CREATE TABLE notifications (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    message TEXT NOT NULL,
+    type TEXT NOT NULL DEFAULT 'system',
+    read BOOLEAN DEFAULT false,
+    data JSONB,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Session Insights (AI-generated)
+CREATE TABLE session_insights (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    session_id UUID REFERENCES sessions(id) ON DELETE CASCADE UNIQUE,
+    insights JSONB NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- User Notification Preferences
+CREATE TABLE user_notification_preferences (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE UNIQUE,
+    session_updates BOOLEAN DEFAULT true,
+    observation_updates BOOLEAN DEFAULT true,
+    invitation_updates BOOLEAN DEFAULT true,
+    browser_notifications BOOLEAN DEFAULT false,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- ============================================
 -- INDEXES
 -- ============================================
@@ -184,6 +216,11 @@ CREATE INDEX idx_observations_user ON observations(user_id);
 CREATE INDEX idx_observation_waste_links_observation ON observation_waste_links(observation_id);
 CREATE INDEX idx_observation_waste_links_waste_type ON observation_waste_links(waste_type_id);
 CREATE INDEX idx_training_progress_user ON training_progress(user_id);
+CREATE INDEX idx_notifications_user ON notifications(user_id);
+CREATE INDEX idx_notifications_read ON notifications(user_id, read);
+CREATE INDEX idx_notifications_created ON notifications(created_at DESC);
+CREATE INDEX idx_session_insights_session ON session_insights(session_id);
+CREATE INDEX idx_user_notification_preferences_user ON user_notification_preferences(user_id);
 
 -- ============================================
 -- ROW LEVEL SECURITY POLICIES
@@ -202,106 +239,116 @@ ALTER TABLE observations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE observation_waste_links ENABLE ROW LEVEL SECURITY;
 ALTER TABLE training_content ENABLE ROW LEVEL SECURITY;
 ALTER TABLE training_progress ENABLE ROW LEVEL SECURITY;
+ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE session_insights ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_notification_preferences ENABLE ROW LEVEL SECURITY;
 
--- Users can read their own organization
+-- ============================================
+-- HELPER FUNCTIONS (SECURITY DEFINER to avoid RLS recursion)
+-- ============================================
+
+CREATE OR REPLACE FUNCTION get_user_org_id()
+RETURNS UUID AS $$
+  SELECT org_id FROM public.users WHERE id = auth.uid()
+$$ LANGUAGE SQL SECURITY DEFINER STABLE;
+
+CREATE OR REPLACE FUNCTION get_user_role()
+RETURNS user_role AS $$
+  SELECT role FROM public.users WHERE id = auth.uid()
+$$ LANGUAGE SQL SECURITY DEFINER STABLE;
+
+-- ============================================
+-- RLS POLICIES
+-- ============================================
+
+-- Organizations
 CREATE POLICY "Users can view own org" ON organizations
-    FOR SELECT USING (
-        id IN (SELECT org_id FROM users WHERE id = auth.uid())
-    );
+    FOR SELECT USING (id = get_user_org_id());
 
--- Users can read/update their own profile
+-- Users
 CREATE POLICY "Users can view own profile" ON users
-    FOR SELECT USING (id = auth.uid() OR org_id IN (SELECT org_id FROM users WHERE id = auth.uid()));
+    FOR SELECT USING (id = auth.uid() OR org_id = get_user_org_id());
 
 CREATE POLICY "Users can update own profile" ON users
     FOR UPDATE USING (id = auth.uid());
 
--- Users can view processes in their org
-CREATE POLICY "Users can view org processes" ON processes
-    FOR SELECT USING (
-        org_id IN (SELECT org_id FROM users WHERE id = auth.uid())
+-- Processes
+CREATE POLICY "Users can view processes" ON processes
+    FOR SELECT USING (org_id IS NULL OR org_id = get_user_org_id());
+
+CREATE POLICY "Users can create processes" ON processes
+    FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
+
+CREATE POLICY "Users can manage own processes" ON processes
+    FOR UPDATE USING (
+        created_by = auth.uid() OR
+        get_user_role() IN ('admin', 'facilitator')
     );
 
--- Facilitators and admins can create/update processes
-CREATE POLICY "Facilitators can manage processes" ON processes
-    FOR ALL USING (
-        org_id IN (SELECT org_id FROM users WHERE id = auth.uid())
-        AND EXISTS (
-            SELECT 1 FROM users 
-            WHERE id = auth.uid() 
-            AND role IN ('admin', 'facilitator')
-        )
+CREATE POLICY "Users can delete own processes" ON processes
+    FOR DELETE USING (
+        created_by = auth.uid() OR
+        get_user_role() IN ('admin', 'facilitator')
     );
 
--- Users can view process steps
+-- Process Steps
 CREATE POLICY "Users can view process steps" ON process_steps
     FOR SELECT USING (
         process_id IN (
             SELECT id FROM processes 
-            WHERE org_id IN (SELECT org_id FROM users WHERE id = auth.uid())
+            WHERE org_id IS NULL OR org_id = get_user_org_id()
         )
     );
 
--- Step connections follow process permissions
+CREATE POLICY "Users can create process steps" ON process_steps
+    FOR INSERT WITH CHECK (true);
+
+-- Step Connections
 CREATE POLICY "Users can view step connections" ON step_connections
     FOR SELECT USING (
         process_id IN (
             SELECT id FROM processes 
-            WHERE org_id IN (SELECT org_id FROM users WHERE id = auth.uid())
+            WHERE org_id IS NULL OR org_id = get_user_org_id()
         )
     );
 
--- Everyone can view waste types
+CREATE POLICY "Users can create step connections" ON step_connections
+    FOR INSERT WITH CHECK (true);
+
+-- Waste Types
 CREATE POLICY "Anyone can view waste types" ON waste_types
     FOR SELECT USING (true);
 
--- Only admins can modify waste types
 CREATE POLICY "Admins can manage waste types" ON waste_types
-    FOR ALL USING (
-        EXISTS (SELECT 1 FROM users WHERE id = auth.uid() AND role = 'admin')
-    );
+    FOR ALL USING (get_user_role() = 'admin');
 
--- Users can view sessions they participate in
+-- Sessions
 CREATE POLICY "Users can view sessions" ON sessions
     FOR SELECT USING (
         facilitator_id = auth.uid()
         OR id IN (SELECT session_id FROM session_participants WHERE user_id = auth.uid())
-        OR process_id IN (
-            SELECT id FROM processes 
-            WHERE org_id IN (SELECT org_id FROM users WHERE id = auth.uid())
-        )
+        OR process_id IN (SELECT id FROM processes WHERE org_id IS NULL OR org_id = get_user_org_id())
     );
 
--- Facilitators can create/manage sessions
 CREATE POLICY "Facilitators can manage sessions" ON sessions
     FOR ALL USING (
         facilitator_id = auth.uid()
-        OR EXISTS (
-            SELECT 1 FROM users 
-            WHERE id = auth.uid() 
-            AND role IN ('admin', 'facilitator')
-        )
+        OR get_user_role() IN ('admin', 'facilitator')
     );
 
--- Session participants
+-- Session Participants
 CREATE POLICY "Users can view session participants" ON session_participants
-    FOR SELECT USING (
-        session_id IN (SELECT id FROM sessions WHERE facilitator_id = auth.uid())
-        OR user_id = auth.uid()
-    );
+    FOR SELECT USING (true);
 
 CREATE POLICY "Users can join sessions" ON session_participants
     FOR INSERT WITH CHECK (user_id = auth.uid());
 
+CREATE POLICY "Users can update own participation" ON session_participants
+    FOR UPDATE USING (user_id = auth.uid());
+
 -- Observations
 CREATE POLICY "Users can view observations in their sessions" ON observations
-    FOR SELECT USING (
-        session_id IN (
-            SELECT id FROM sessions 
-            WHERE facilitator_id = auth.uid()
-            OR id IN (SELECT session_id FROM session_participants WHERE user_id = auth.uid())
-        )
-    );
+    FOR SELECT USING (true);
 
 CREATE POLICY "Users can create observations" ON observations
     FOR INSERT WITH CHECK (user_id = auth.uid());
@@ -309,37 +356,66 @@ CREATE POLICY "Users can create observations" ON observations
 CREATE POLICY "Users can update own observations" ON observations
     FOR UPDATE USING (user_id = auth.uid());
 
--- Observation waste links
+CREATE POLICY "Users can delete own observations" ON observations
+    FOR DELETE USING (user_id = auth.uid());
+
+-- Observation Waste Links
 CREATE POLICY "Users can view observation waste links" ON observation_waste_links
-    FOR SELECT USING (
-        observation_id IN (SELECT id FROM observations WHERE user_id = auth.uid())
-        OR observation_id IN (
-            SELECT id FROM observations 
-            WHERE session_id IN (
-                SELECT id FROM sessions WHERE facilitator_id = auth.uid()
-            )
-        )
-    );
+    FOR SELECT USING (true);
 
 CREATE POLICY "Users can manage own observation links" ON observation_waste_links
     FOR ALL USING (
         observation_id IN (SELECT id FROM observations WHERE user_id = auth.uid())
     );
 
--- Training content is public
+-- Training Content
 CREATE POLICY "Anyone can view training content" ON training_content
     FOR SELECT USING (true);
 
 CREATE POLICY "Admins can manage training content" ON training_content
-    FOR ALL USING (
-        EXISTS (SELECT 1 FROM users WHERE id = auth.uid() AND role = 'admin')
-    );
+    FOR ALL USING (get_user_role() = 'admin');
 
--- Training progress
+-- Training Progress
 CREATE POLICY "Users can view own progress" ON training_progress
     FOR SELECT USING (user_id = auth.uid());
 
-CREATE POLICY "Users can update own progress" ON training_progress
+CREATE POLICY "Users can manage own progress" ON training_progress
+    FOR ALL USING (user_id = auth.uid());
+
+-- Notifications
+CREATE POLICY "Users can view own notifications" ON notifications
+    FOR SELECT USING (user_id = auth.uid());
+
+CREATE POLICY "Users can update own notifications" ON notifications
+    FOR UPDATE USING (user_id = auth.uid());
+
+CREATE POLICY "Users can delete own notifications" ON notifications
+    FOR DELETE USING (user_id = auth.uid());
+
+CREATE POLICY "System can create notifications" ON notifications
+    FOR INSERT WITH CHECK (true);
+
+-- Session Insights
+CREATE POLICY "Users can view insights for accessible sessions" ON session_insights
+    FOR SELECT USING (
+        session_id IN (
+            SELECT id FROM sessions 
+            WHERE facilitator_id = auth.uid()
+            OR id IN (SELECT session_id FROM session_participants WHERE user_id = auth.uid())
+            OR process_id IN (SELECT id FROM processes WHERE org_id IS NULL OR org_id = get_user_org_id())
+        )
+    );
+
+CREATE POLICY "Facilitators can manage session insights" ON session_insights
+    FOR ALL USING (
+        get_user_role() IN ('admin', 'facilitator')
+    );
+
+-- User Notification Preferences
+CREATE POLICY "Users can view own notification preferences" ON user_notification_preferences
+    FOR SELECT USING (user_id = auth.uid());
+
+CREATE POLICY "Users can manage own notification preferences" ON user_notification_preferences
     FOR ALL USING (user_id = auth.uid());
 
 -- ============================================
@@ -354,6 +430,29 @@ BEGIN
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+
+-- Function to handle new user signups (sync auth.users to public.users)
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER AS $$
+BEGIN
+    INSERT INTO public.users (id, email, name, role)
+    VALUES (
+        NEW.id,
+        NEW.email,
+        COALESCE(NEW.raw_user_meta_data->>'name', split_part(NEW.email, '@', 1)),
+        COALESCE((NEW.raw_user_meta_data->>'role')::user_role, 'participant')
+    )
+    ON CONFLICT (id) DO UPDATE SET
+        email = EXCLUDED.email,
+        name = EXCLUDED.name;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Trigger for new user signups
+CREATE TRIGGER on_auth_user_created
+    AFTER INSERT ON auth.users
+    FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
 -- Apply updated_at trigger to all tables
 CREATE TRIGGER update_organizations_updated_at
@@ -390,6 +489,10 @@ CREATE TRIGGER update_training_content_updated_at
 
 CREATE TRIGGER update_training_progress_updated_at
     BEFORE UPDATE ON training_progress
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE TRIGGER update_user_notification_preferences_updated_at
+    BEFORE UPDATE ON user_notification_preferences
     FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
 -- ============================================
@@ -480,4 +583,5 @@ INSERT INTO training_content (title, type, description, order_index, duration_mi
 ALTER PUBLICATION supabase_realtime ADD TABLE observations;
 ALTER PUBLICATION supabase_realtime ADD TABLE session_participants;
 ALTER PUBLICATION supabase_realtime ADD TABLE sessions;
+ALTER PUBLICATION supabase_realtime ADD TABLE notifications;
 

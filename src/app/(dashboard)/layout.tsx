@@ -2,7 +2,8 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Sidebar } from "@/components/layout/Sidebar";
+import Link from "next/link";
+import { Sidebar, MobileSidebarTrigger } from "@/components/layout/Sidebar";
 import { useAuthStore } from "@/lib/stores/authStore";
 import { getSupabaseClient } from "@/lib/supabase/client";
 import { Loader2 } from "lucide-react";
@@ -84,8 +85,25 @@ export default function DashboardLayout({
 
   return (
     <div className="flex h-screen bg-brand-platinum/30">
+      {/* Desktop Sidebar */}
       <Sidebar />
-      <main className="flex-1 overflow-auto">{children}</main>
+      
+      {/* Main Content */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Mobile Header */}
+        <header className="md:hidden flex items-center h-14 px-4 border-b bg-white">
+          <MobileSidebarTrigger />
+          <Link href="/dashboard" className="flex items-center gap-2 ml-3">
+            <div className="w-7 h-7 rounded-lg bg-brand-gold flex items-center justify-center">
+              <span className="text-xs font-bold text-brand-navy">PO</span>
+            </div>
+            <span className="font-semibold text-brand-navy text-sm">ProcessOpt</span>
+          </Link>
+        </header>
+        
+        {/* Page Content */}
+        <main className="flex-1 overflow-auto">{children}</main>
+      </div>
     </div>
   );
 }

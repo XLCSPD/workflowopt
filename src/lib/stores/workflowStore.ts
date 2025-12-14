@@ -47,12 +47,21 @@ interface WorkflowState {
   reset: () => void;
 }
 
-const SWIMLANE_COLORS: Record<string, string> = {
-  "Premier Health": "#4299E1",
-  "Versatex": "#48BB78",
-  "Merchant": "#ED8936",
-  default: "#A0AEC0",
-};
+// Dynamic color palette for swimlanes - cycles through these colors
+const SWIMLANE_COLOR_PALETTE = [
+  "#3B82F6", // Blue
+  "#22C55E", // Green
+  "#F59E0B", // Amber
+  "#EC4899", // Pink
+  "#6366F1", // Indigo
+  "#06B6D4", // Cyan
+  "#EF4444", // Red
+  "#A855F7", // Purple
+];
+
+function getSwimlaneColor(index: number): string {
+  return SWIMLANE_COLOR_PALETTE[index % SWIMLANE_COLOR_PALETTE.length];
+}
 
 const initialState = {
   currentProcess: null,
@@ -99,10 +108,10 @@ export const useWorkflowStore = create<WorkflowState>()((set, get) => ({
     });
 
     const swimlanes: Swimlane[] = Array.from(laneMap.entries()).map(
-      ([name, laneSteps]) => ({
+      ([name, laneSteps], index) => ({
         id: name.toLowerCase().replace(/\s+/g, "-"),
         name,
-        color: SWIMLANE_COLORS[name] || SWIMLANE_COLORS.default,
+        color: getSwimlaneColor(index),
         steps: laneSteps.sort((a, b) => a.order_index - b.order_index),
       })
     );
@@ -121,10 +130,10 @@ export const useWorkflowStore = create<WorkflowState>()((set, get) => ({
       });
 
       const swimlanes: Swimlane[] = Array.from(laneMap.entries()).map(
-        ([name, laneSteps]) => ({
+        ([name, laneSteps], index) => ({
           id: name.toLowerCase().replace(/\s+/g, "-"),
           name,
-          color: SWIMLANE_COLORS[name] || SWIMLANE_COLORS.default,
+          color: getSwimlaneColor(index),
           steps: laneSteps.sort((a, b) => a.order_index - b.order_index),
         })
       );

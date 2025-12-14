@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useParams } from "next/navigation";
 import Link from "next/link";
 import { Header } from "@/components/layout/Header";
 import { Button } from "@/components/ui/button";
@@ -39,36 +40,33 @@ import {
   AlertTriangle,
   Loader2,
 } from "lucide-react";
-
-// Mock data
-const mockSessionResults = {
-  id: "2",
-  name: "Claims Intake Review",
-  workflowName: "Claims Intake Processing",
-  status: "completed",
-  facilitator: "Jane Doe",
-  participantCount: 6,
-  observationCount: 28,
-  startedAt: "2024-01-10T09:30:00Z",
-  endedAt: "2024-01-10T12:00:00Z",
-  duration: "2h 30m",
-};
-
-const wasteTypeData = [
-  { name: "Waiting", value: 32, color: "#EAB308" },
-  { name: "Integration Waste", value: 25, color: "#7C3AED" },
-  { name: "Defects", value: 18, color: "#EF4444" },
-  { name: "Overproduction", value: 15, color: "#F97316" },
-  { name: "Motion", value: 10, color: "#10B981" },
-];
-
-const wasteByLaneData = [
-  { lane: "Intake", observations: 12, priority: 45 },
-  { lane: "Review", observations: 10, priority: 38 },
-  { lane: "Processing", observations: 6, priority: 22 },
-];
+import { useToast } from "@/hooks/use-toast";
+import { differenceInMinutes } from "date-fns";
+import { getSessionById } from "@/lib/services/sessions";
+import {
+  getWasteDistribution,
+  getWasteByLane,
+} from "@/lib/services/analytics";
+import { getSessionObservationSummary } from "@/lib/services/observations";
+import { exportToPDF, exportToPPTX, exportToCSV } from "@/lib/services/export";
+import type { Session } from "@/types";
+import type { WasteDistribution, LaneStats } from "@/lib/services/analytics";
 
 export default function SessionResultsPage() {
+  const params = useParams();
+  const { toast } = useToast();
+  const sessionId = params.id as string;
+
+  const [isLoading, setIsLoading] = useState(true);
+  const [session, setSession] = useState<Session | null>(null);
+  const [wasteDistribution, setWasteDistribution] = useState<WasteDistribution[]>([]);
+  const [laneStats, setLaneStats] = useState<LaneStats[]>([]);
+  const [summary, setSummary] = useState<{
+    totalCount: number;
+    avgPriority: number;
+    digitalPercentage: number;
+  } | null>(null);
+
   const [exportFormat, setExportFormat] = useState("pdf");
   const [exportSections, setExportSections] = useState({
     wasteDistribution: true,
@@ -79,13 +77,84 @@ export default function SessionResultsPage() {
   });
   const [isExporting, setIsExporting] = useState(false);
 
+  // Load session results
+  useEffect(() => {
+    const loadResults = async () => {
+      try {
+        setIsLoading(true);
+
+        const [sessionData, distribution, lanes, observations] = await Promise.all([
+          getSessionById(sessionId),
+          getWasteDistribution(sessionId),
+          getWasteByLane(sessionId),
+          getSessionObservationSummary(sessionId),
+        ]);
+
+        setSession(sessionData);
+        setWasteDistribution(distribution);
+        setLaneStats(lanes);
+        setSummary({
+          totalCount: observations.totalCount,
+          avgPriority: observations.avgPriority,
+          digitalPercentage: observations.digitalPercentage,
+        });
+      } catch (error) {
+        console.error("Failed to load results:", error);
+        toast({
+          variant: "destructive",
+          title: "Error",
+          description: "Failed to load session results.",
+        });
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadResults();
+  }, [sessionId, toast]);
+
   const handleExport = async () => {
     setIsExporting(true);
-    // Simulate export
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    setIsExporting(false);
-    // In real implementation, this would trigger a download
-    alert(`Export complete! Format: ${exportFormat.toUpperCase()}`);
+    try {
+      switch (exportFormat) {
+        case "pdf":
+          await exportToPDF(sessionId, exportSections);
+          toast({
+            title: "Export complete",
+            description: "PDF report has been downloaded.",
+          });
+          break;
+        case "pptx":
+          await exportToPPTX(sessionId, exportSections);
+          toast({
+            title: "Export complete",
+            description: "PowerPoint presentation has been downloaded.",
+          });
+          break;
+        case "csv":
+          await exportToCSV(sessionId);
+          toast({
+            title: "Export complete",
+            description: "CSV file has been downloaded.",
+          });
+          break;
+        default:
+          toast({
+            variant: "destructive",
+            title: "Error",
+            description: "Unknown export format.",
+          });
+      }
+    } catch (error) {
+      console.error("Export failed:", error);
+      toast({
+        variant: "destructive",
+        title: "Export failed",
+        description: "Failed to export data. Please try again.",
+      });
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   const toggleSection = (section: keyof typeof exportSections) => {
@@ -95,11 +164,42 @@ export default function SessionResultsPage() {
     });
   };
 
+  // Calculate session duration
+  const getDuration = () => {
+    if (!session?.started_at || !session?.ended_at) return "N/A";
+    const minutes = differenceInMinutes(
+      new Date(session.ended_at),
+      new Date(session.started_at)
+    );
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    return hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <Loader2 className="h-8 w-8 animate-spin text-brand-gold" />
+      </div>
+    );
+  }
+
+  if (!session) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full">
+        <p className="text-muted-foreground mb-4">Session not found</p>
+        <Button asChild>
+          <Link href="/sessions">Back to Sessions</Link>
+        </Button>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col h-full">
       <Header
         title="Session Results"
-        description={mockSessionResults.name}
+        description={session.name}
         actions={
           <Button asChild variant="ghost">
             <Link href="/sessions">
@@ -118,11 +218,15 @@ export default function SessionResultsPage() {
               <div>
                 <CardTitle className="flex items-center gap-2">
                   <CheckCircle className="h-5 w-5 text-brand-emerald" />
-                  {mockSessionResults.name}
+                  {session.name}
                 </CardTitle>
-                <CardDescription>{mockSessionResults.workflowName}</CardDescription>
+                <CardDescription>
+                  {(session as Session & { process?: { name: string } }).process?.name || "Workflow"}
+                </CardDescription>
               </div>
-              <Badge className="bg-brand-emerald text-white">Completed</Badge>
+              <Badge className="bg-brand-emerald text-white">
+                {session.status.charAt(0).toUpperCase() + session.status.slice(1)}
+              </Badge>
             </div>
           </CardHeader>
           <CardContent>
@@ -130,29 +234,33 @@ export default function SessionResultsPage() {
               <div className="p-3 rounded-lg bg-muted/50">
                 <div className="flex items-center gap-2 text-muted-foreground text-sm mb-1">
                   <Users className="h-4 w-4" />
-                  Participants
+                  Observations
                 </div>
-                <p className="text-xl font-bold">{mockSessionResults.participantCount}</p>
+                <p className="text-xl font-bold">{summary?.totalCount || 0}</p>
               </div>
               <div className="p-3 rounded-lg bg-muted/50">
                 <div className="flex items-center gap-2 text-muted-foreground text-sm mb-1">
                   <AlertTriangle className="h-4 w-4" />
-                  Observations
+                  Avg Priority
                 </div>
-                <p className="text-xl font-bold">{mockSessionResults.observationCount}</p>
+                <p className="text-xl font-bold">
+                  {summary?.avgPriority?.toFixed(1) || 0}
+                </p>
               </div>
               <div className="p-3 rounded-lg bg-muted/50">
                 <div className="flex items-center gap-2 text-muted-foreground text-sm mb-1">
                   <Clock className="h-4 w-4" />
                   Duration
                 </div>
-                <p className="text-xl font-bold">{mockSessionResults.duration}</p>
+                <p className="text-xl font-bold">{getDuration()}</p>
               </div>
               <div className="p-3 rounded-lg bg-muted/50">
                 <div className="flex items-center gap-2 text-muted-foreground text-sm mb-1">
-                  Facilitator
+                  Digital Waste %
                 </div>
-                <p className="text-xl font-bold">{mockSessionResults.facilitator}</p>
+                <p className="text-xl font-bold">
+                  {summary?.digitalPercentage?.toFixed(0) || 0}%
+                </p>
               </div>
             </div>
           </CardContent>
@@ -165,37 +273,48 @@ export default function SessionResultsPage() {
               <CardTitle>Waste Type Distribution</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="h-[250px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={wasteTypeData}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={50}
-                      outerRadius={80}
-                      paddingAngle={2}
-                      dataKey="value"
-                    >
-                      {wasteTypeData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <Tooltip />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-              <div className="flex flex-wrap gap-2 mt-4 justify-center">
-                {wasteTypeData.map((item) => (
-                  <Badge
-                    key={item.name}
-                    variant="outline"
-                    style={{ borderColor: item.color, color: item.color }}
-                  >
-                    {item.name}: {item.value}%
-                  </Badge>
-                ))}
-              </div>
+              {wasteDistribution.length > 0 ? (
+                <>
+                  <div className="h-[250px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={wasteDistribution.map(w => ({ ...w, value: w.percentage }))}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={50}
+                          outerRadius={80}
+                          paddingAngle={2}
+                          dataKey="percentage"
+                          nameKey="name"
+                        >
+                          {wasteDistribution.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={entry.color} />
+                          ))}
+                        </Pie>
+                        <Tooltip
+                          formatter={(value: number) => [`${value}%`, "Percentage"]}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="flex flex-wrap gap-2 mt-4 justify-center">
+                    {wasteDistribution.map((item) => (
+                      <Badge
+                        key={item.name}
+                        variant="outline"
+                        style={{ borderColor: item.color, color: item.color }}
+                      >
+                        {item.name}: {item.percentage}%
+                      </Badge>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <div className="h-[250px] flex items-center justify-center text-muted-foreground">
+                  No waste data available
+                </div>
+              )}
             </CardContent>
           </Card>
 
@@ -205,22 +324,28 @@ export default function SessionResultsPage() {
               <CardTitle>Observations by Lane</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="h-[250px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={wasteByLaneData}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="lane" />
-                    <YAxis />
-                    <Tooltip />
-                    <Bar
-                      dataKey="observations"
-                      name="Observations"
-                      fill="#FFC000"
-                      radius={[4, 4, 0, 0]}
-                    />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
+              {laneStats.length > 0 ? (
+                <div className="h-[250px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={laneStats}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="lane" />
+                      <YAxis />
+                      <Tooltip />
+                      <Bar
+                        dataKey="observations"
+                        name="Observations"
+                        fill="#FFC000"
+                        radius={[4, 4, 0, 0]}
+                      />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : (
+                <div className="h-[250px] flex items-center justify-center text-muted-foreground">
+                  No lane data available
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>
@@ -301,16 +426,10 @@ export default function SessionResultsPage() {
                 <Label className="text-base font-medium">Include Sections</Label>
                 <div className="space-y-3">
                   {[
-                    {
-                      key: "wasteDistribution",
-                      label: "Waste Distribution Charts",
-                    },
+                    { key: "wasteDistribution", label: "Waste Distribution Charts" },
                     { key: "heatmap", label: "Process Heatmap" },
                     { key: "topOpportunities", label: "Top Opportunities" },
-                    {
-                      key: "participantActivity",
-                      label: "Participant Activity Log",
-                    },
+                    { key: "participantActivity", label: "Participant Activity Log" },
                     { key: "rawData", label: "Raw Observation Data" },
                   ].map((section) => (
                     <label
@@ -319,14 +438,10 @@ export default function SessionResultsPage() {
                     >
                       <Checkbox
                         checked={
-                          exportSections[
-                            section.key as keyof typeof exportSections
-                          ]
+                          exportSections[section.key as keyof typeof exportSections]
                         }
                         onCheckedChange={() =>
-                          toggleSection(
-                            section.key as keyof typeof exportSections
-                          )
+                          toggleSection(section.key as keyof typeof exportSections)
                         }
                       />
                       <span>{section.label}</span>
@@ -361,4 +476,3 @@ export default function SessionResultsPage() {
     </div>
   );
 }
-

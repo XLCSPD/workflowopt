@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useForm } from "react-hook-form";
@@ -33,6 +33,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ArrowLeft, Play, Users, GitBranch, Loader2 } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import { getProcesses } from "@/lib/services/workflows";
+import { createSession, startSession } from "@/lib/services/sessions";
+import type { Process } from "@/types";
 
 const sessionSchema = z.object({
   name: z.string().min(3, "Session name must be at least 3 characters"),
@@ -41,16 +45,14 @@ const sessionSchema = z.object({
 
 type SessionFormData = z.infer<typeof sessionSchema>;
 
-const mockWorkflows = [
-  { id: "1", name: "Premier Health & Versatex Procurement Workflow", stepCount: 17 },
-  { id: "2", name: "Claims Intake Processing", stepCount: 12 },
-  { id: "3", name: "Invoice Approval Process", stepCount: 8 },
-];
-
 export default function NewSessionPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { toast } = useToast();
   const preselectedWorkflow = searchParams.get("workflow");
+  
+  const [workflows, setWorkflows] = useState<Process[]>([]);
+  const [isLoadingWorkflows, setIsLoadingWorkflows] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const form = useForm<SessionFormData>({
@@ -61,17 +63,61 @@ export default function NewSessionPage() {
     },
   });
 
-  const handleSubmit = async () => {
-    setIsSubmitting(true);
-    
-    // Simulate API call
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    
-    // Navigate to the new session
-    router.push(`/sessions/1`);
+  // Fetch workflows
+  useEffect(() => {
+    const loadWorkflows = async () => {
+      try {
+        setIsLoadingWorkflows(true);
+        const data = await getProcesses();
+        setWorkflows(data);
+      } catch (error) {
+        console.error("Failed to load workflows:", error);
+        toast({
+          variant: "destructive",
+          title: "Error",
+          description: "Failed to load workflows.",
+        });
+      } finally {
+        setIsLoadingWorkflows(false);
+      }
+    };
+
+    loadWorkflows();
+  }, [toast]);
+
+  const handleSubmit = async (data: SessionFormData) => {
+    try {
+      setIsSubmitting(true);
+      
+      // Create the session
+      const session = await createSession({
+        name: data.name,
+        process_id: data.workflowId,
+      });
+
+      // Start the session immediately
+      await startSession(session.id);
+      
+      toast({
+        title: "Session created",
+        description: "Your session has been created and started.",
+      });
+
+      // Navigate to the session
+      router.push(`/sessions/${session.id}`);
+    } catch (error) {
+      console.error("Failed to create session:", error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to create session. Please try again.",
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const selectedWorkflow = mockWorkflows.find(
+  const selectedWorkflow = workflows.find(
     (w) => w.id === form.watch("workflowId")
   );
 
@@ -137,21 +183,26 @@ export default function NewSessionPage() {
                         <Select
                           onValueChange={field.onChange}
                           defaultValue={field.value}
+                          disabled={isLoadingWorkflows}
                         >
                           <FormControl>
                             <SelectTrigger>
-                              <SelectValue placeholder="Choose a workflow to analyze" />
+                              {isLoadingWorkflows ? (
+                                <div className="flex items-center gap-2">
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                  Loading workflows...
+                                </div>
+                              ) : (
+                                <SelectValue placeholder="Choose a workflow to analyze" />
+                              )}
                             </SelectTrigger>
                           </FormControl>
                           <SelectContent>
-                            {mockWorkflows.map((workflow) => (
+                            {workflows.map((workflow) => (
                               <SelectItem key={workflow.id} value={workflow.id}>
                                 <div className="flex items-center gap-2">
                                   <GitBranch className="h-4 w-4" />
                                   {workflow.name}
-                                  <span className="text-muted-foreground">
-                                    ({workflow.stepCount} steps)
-                                  </span>
                                 </div>
                               </SelectItem>
                             ))}
@@ -171,9 +222,11 @@ export default function NewSessionPage() {
                       <p className="text-sm text-muted-foreground">
                         {selectedWorkflow.name}
                       </p>
-                      <p className="text-sm text-muted-foreground mt-1">
-                        {selectedWorkflow.stepCount} steps to review
-                      </p>
+                      {selectedWorkflow.description && (
+                        <p className="text-sm text-muted-foreground mt-1">
+                          {selectedWorkflow.description}
+                        </p>
+                      )}
                     </div>
                   )}
 
@@ -183,13 +236,14 @@ export default function NewSessionPage() {
                       variant="outline"
                       onClick={() => router.back()}
                       className="flex-1"
+                      disabled={isSubmitting}
                     >
                       Cancel
                     </Button>
                     <Button
                       type="submit"
                       className="flex-1 bg-brand-gold hover:bg-brand-gold/90 text-brand-navy"
-                      disabled={isSubmitting}
+                      disabled={isSubmitting || isLoadingWorkflows}
                     >
                       {isSubmitting ? (
                         <>
@@ -213,4 +267,3 @@ export default function NewSessionPage() {
     </div>
   );
 }
-

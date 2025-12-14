@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Header } from "@/components/layout/Header";
 import { Button } from "@/components/ui/button";
 import {
@@ -16,6 +16,14 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -24,14 +32,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import {
   Select,
   SelectContent,
@@ -43,278 +43,842 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   Plus,
   MoreVertical,
   Edit,
   Trash2,
-  Upload,
+  AlertTriangle,
+  BookOpen,
+  Users,
+  Loader2,
   Video,
   FileText,
-  BookOpen,
-  HelpCircle,
-  Users,
-  AlertTriangle,
-  Settings,
+  Mail,
+  Shield,
+  UserCog,
+  UserMinus,
+  Building,
+  Save,
+  Clock,
+  XCircle,
+  BarChart3,
+  Workflow,
+  ClipboardList,
+  Eye,
 } from "lucide-react";
-
-// Mock data
-const mockWasteTypes = [
-  {
-    id: "1",
-    code: "D",
-    name: "Defects",
-    category: "core_lean",
-    description: "Errors, rework, mistakes that require correction",
-    examples: ["Data entry errors", "System bugs", "Incorrect file formats"],
-  },
-  {
-    id: "2",
-    code: "W",
-    name: "Waiting",
-    category: "core_lean",
-    description: "Idle time waiting for the next step",
-    examples: ["System load times", "Waiting for approvals", "Queue delays"],
-  },
-  {
-    id: "3",
-    code: "IW",
-    name: "Integration Waste",
-    category: "digital",
-    description: "Friction from disconnected systems",
-    examples: ["Manual data transfer", "Re-keying information", "Export/import"],
-  },
-];
-
-const mockTrainingContent = [
-  {
-    id: "1",
-    title: "Introduction to Lean Waste",
-    type: "video",
-    duration: 15,
-    updatedAt: "2024-01-15",
-  },
-  {
-    id: "2",
-    title: "DOWNTIME Wastes Explained",
-    type: "slides",
-    duration: 20,
-    updatedAt: "2024-01-10",
-  },
-  {
-    id: "3",
-    title: "Digital Waste in Modern Workflows",
-    type: "article",
-    duration: 10,
-    updatedAt: "2024-01-05",
-  },
-  {
-    id: "4",
-    title: "Waste Identification Quiz",
-    type: "quiz",
-    duration: 15,
-    updatedAt: "2024-01-01",
-  },
-];
-
-const mockUsers = [
-  {
-    id: "1",
-    name: "Ayo Sasore",
-    email: "ayo@versatex.com",
-    role: "admin",
-    status: "active",
-  },
-  {
-    id: "2",
-    name: "Jane Doe",
-    email: "jane@premierhealth.com",
-    role: "facilitator",
-    status: "active",
-  },
-  {
-    id: "3",
-    name: "John Smith",
-    email: "john@versatex.com",
-    role: "participant",
-    status: "active",
-  },
-];
-
-const getTypeIcon = (type: string) => {
-  switch (type) {
-    case "video":
-      return Video;
-    case "slides":
-      return FileText;
-    case "article":
-      return BookOpen;
-    case "quiz":
-      return HelpCircle;
-    default:
-      return FileText;
-  }
-};
+import { useToast } from "@/hooks/use-toast";
+import {
+  getWasteTypes,
+  createWasteType,
+  updateWasteType,
+  deleteWasteType,
+} from "@/lib/services/wasteTypes";
+import {
+  getTrainingContent,
+  createTrainingContent,
+  updateTrainingContent,
+  deleteTrainingContent,
+} from "@/lib/services/training";
+import {
+  getOrganizationUsers,
+  inviteUser,
+  updateUserRole,
+  removeUserFromOrganization,
+  getRoleBadgeVariant,
+  getRoleDisplayName,
+  getPendingInvitations,
+  cancelInvitation,
+  type Invitation,
+} from "@/lib/services/users";
+import {
+  getCurrentOrganization,
+  createOrganization,
+  updateOrganization,
+  getOrganizationStats,
+  type OrganizationStats,
+} from "@/lib/services/organizations";
+import { useAuthStore } from "@/lib/stores/authStore";
+import type { WasteType, TrainingContent, User, UserRole, Organization } from "@/types";
 
 export default function AdminPage() {
-  const [activeTab, setActiveTab] = useState("waste-types");
+  const { toast } = useToast();
+  const { user: currentUser } = useAuthStore();
+  const [activeTab, setActiveTab] = useState("organization");
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Waste Types State
+  const [wasteTypes, setWasteTypes] = useState<WasteType[]>([]);
   const [isWasteDialogOpen, setIsWasteDialogOpen] = useState(false);
-  const [isContentDialogOpen, setIsContentDialogOpen] = useState(false);
+  const [editingWasteType, setEditingWasteType] = useState<WasteType | null>(null);
+  const [wasteForm, setWasteForm] = useState({
+    code: "",
+    name: "",
+    description: "",
+    category: "core_lean" as "core_lean" | "digital",
+  });
+
+  // Training Content State
+  const [trainingContent, setTrainingContent] = useState<TrainingContent[]>([]);
+  const [isTrainingDialogOpen, setIsTrainingDialogOpen] = useState(false);
+  const [editingTraining, setEditingTraining] = useState<TrainingContent | null>(null);
+  const [trainingForm, setTrainingForm] = useState({
+    title: "",
+    description: "",
+    type: "video" as "video" | "slides" | "article" | "quiz",
+    duration_minutes: 10,
+    order_index: 0,
+  });
+
+  // Users State
+  const [users, setUsers] = useState<User[]>([]);
+  const [isUserDialogOpen, setIsUserDialogOpen] = useState(false);
+  const [isRoleDialogOpen, setIsRoleDialogOpen] = useState(false);
+  const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [inviteForm, setInviteForm] = useState({
+    email: "",
+    role: "participant" as UserRole,
+  });
+  const [isInviting, setIsInviting] = useState(false);
+  const [pendingInvitations, setPendingInvitations] = useState<Invitation[]>([]);
+
+  // Organization State
+  const [organization, setOrganization] = useState<Organization | null>(null);
+  const [orgStats, setOrgStats] = useState<OrganizationStats | null>(null);
+  const [isOrgDialogOpen, setIsOrgDialogOpen] = useState(false);
+  const [isCreateOrgDialogOpen, setIsCreateOrgDialogOpen] = useState(false);
+  const [orgForm, setOrgForm] = useState({ name: "" });
+  const [isSavingOrg, setIsSavingOrg] = useState(false);
+
+  // Load data
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        setIsLoading(true);
+        const [wasteTypesData, trainingData, usersData, orgData, invitationsData] = await Promise.all([
+          getWasteTypes(),
+          getTrainingContent(),
+          getOrganizationUsers(),
+          getCurrentOrganization(),
+          getPendingInvitations(),
+        ]);
+        setWasteTypes(wasteTypesData);
+        setTrainingContent(trainingData);
+        setUsers(usersData);
+        setOrganization(orgData);
+        setPendingInvitations(invitationsData);
+
+        // Load org stats if we have an org
+        if (orgData) {
+          const stats = await getOrganizationStats(orgData.id);
+          setOrgStats(stats);
+          setOrgForm({ name: orgData.name });
+        }
+      } catch (error) {
+        console.error("Failed to load admin data:", error);
+        toast({
+          variant: "destructive",
+          title: "Error",
+          description: "Failed to load data.",
+        });
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    loadData();
+  }, [toast]);
+
+  // Waste Type CRUD
+  const handleSaveWasteType = async () => {
+    try {
+      if (editingWasteType) {
+        const updated = await updateWasteType(editingWasteType.id, wasteForm);
+        setWasteTypes(wasteTypes.map((wt) => (wt.id === updated.id ? updated : wt)));
+        toast({ title: "Waste type updated" });
+      } else {
+        const created = await createWasteType(wasteForm);
+        setWasteTypes([...wasteTypes, created]);
+        toast({ title: "Waste type created" });
+      }
+      setIsWasteDialogOpen(false);
+      resetWasteForm();
+    } catch (error) {
+      console.error("Failed to save waste type:", error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to save waste type.",
+      });
+    }
+  };
+
+  const handleEditWasteType = (wt: WasteType) => {
+    setEditingWasteType(wt);
+    setWasteForm({
+      code: wt.code,
+      name: wt.name,
+      description: wt.description,
+      category: wt.category,
+    });
+    setIsWasteDialogOpen(true);
+  };
+
+  const handleDeleteWasteType = async (id: string) => {
+    try {
+      await deleteWasteType(id);
+      setWasteTypes(wasteTypes.filter((wt) => wt.id !== id));
+      toast({ title: "Waste type deleted" });
+    } catch (error) {
+      console.error("Failed to delete waste type:", error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to delete waste type.",
+      });
+    }
+  };
+
+  const resetWasteForm = () => {
+    setEditingWasteType(null);
+    setWasteForm({ code: "", name: "", description: "", category: "core_lean" });
+  };
+
+  // Training Content CRUD
+  const handleSaveTraining = async () => {
+    try {
+      if (editingTraining) {
+        const updated = await updateTrainingContent(editingTraining.id, trainingForm);
+        setTrainingContent(trainingContent.map((tc) => (tc.id === updated.id ? updated : tc)));
+        toast({ title: "Training content updated" });
+      } else {
+        const created = await createTrainingContent({
+          ...trainingForm,
+          content: JSON.stringify({}),
+        });
+        setTrainingContent([...trainingContent, created]);
+        toast({ title: "Training content created" });
+      }
+      setIsTrainingDialogOpen(false);
+      resetTrainingForm();
+    } catch (error) {
+      console.error("Failed to save training content:", error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to save training content.",
+      });
+    }
+  };
+
+  const handleEditTraining = (tc: TrainingContent) => {
+    setEditingTraining(tc);
+    setTrainingForm({
+      title: tc.title,
+      description: tc.description || "",
+      type: tc.type,
+      duration_minutes: tc.duration_minutes || 10,
+      order_index: tc.order_index,
+    });
+    setIsTrainingDialogOpen(true);
+  };
+
+  const handleDeleteTraining = async (id: string) => {
+    try {
+      await deleteTrainingContent(id);
+      setTrainingContent(trainingContent.filter((tc) => tc.id !== id));
+      toast({ title: "Training content deleted" });
+    } catch (error) {
+      console.error("Failed to delete training content:", error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to delete training content.",
+      });
+    }
+  };
+
+  const resetTrainingForm = () => {
+    setEditingTraining(null);
+    setTrainingForm({
+      title: "",
+      description: "",
+      type: "video",
+      duration_minutes: 10,
+      order_index: trainingContent.length,
+    });
+  };
+
+  // User Management
+  const handleInviteUser = async () => {
+    if (!inviteForm.email) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Please enter an email address.",
+      });
+      return;
+    }
+
+    setIsInviting(true);
+    try {
+      const result = await inviteUser(inviteForm.email, inviteForm.role);
+      
+      if (result.success) {
+        toast({ title: "Success", description: result.message });
+        setIsUserDialogOpen(false);
+        resetInviteForm();
+        // Reload users
+        const usersData = await getOrganizationUsers();
+        setUsers(usersData);
+      } else {
+        toast({
+          variant: "destructive",
+          title: "Error",
+          description: result.message,
+        });
+      }
+    } catch (error) {
+      console.error("Failed to invite user:", error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to invite user.",
+      });
+    } finally {
+      setIsInviting(false);
+    }
+  };
+
+  const handleUpdateRole = async (userId: string, newRole: UserRole) => {
+    try {
+      const updated = await updateUserRole(userId, newRole);
+      setUsers(users.map((u) => (u.id === updated.id ? updated : u)));
+      toast({ title: "Role updated", description: `User role changed to ${getRoleDisplayName(newRole)}` });
+      setIsRoleDialogOpen(false);
+      setEditingUser(null);
+    } catch (error) {
+      console.error("Failed to update role:", error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to update user role.",
+      });
+    }
+  };
+
+  const handleRemoveUser = async (userId: string) => {
+    if (userId === currentUser?.id) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "You cannot remove yourself from the organization.",
+      });
+      return;
+    }
+
+    try {
+      await removeUserFromOrganization(userId);
+      setUsers(users.filter((u) => u.id !== userId));
+      toast({ title: "User removed", description: "User has been removed from the organization." });
+    } catch (error) {
+      console.error("Failed to remove user:", error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to remove user.",
+      });
+    }
+  };
+
+  const resetInviteForm = () => {
+    setInviteForm({ email: "", role: "participant" });
+  };
+
+  // Organization Management
+  const handleSaveOrganization = async () => {
+    if (!orgForm.name.trim()) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Organization name is required.",
+      });
+      return;
+    }
+
+    setIsSavingOrg(true);
+    try {
+      if (organization) {
+        const updated = await updateOrganization(organization.id, { name: orgForm.name });
+        setOrganization(updated);
+        toast({ title: "Success", description: "Organization updated." });
+      } else {
+        const created = await createOrganization({ name: orgForm.name });
+        setOrganization(created);
+        const stats = await getOrganizationStats(created.id);
+        setOrgStats(stats);
+        setIsCreateOrgDialogOpen(false);
+        toast({ title: "Success", description: "Organization created." });
+      }
+      setIsOrgDialogOpen(false);
+    } catch (error) {
+      console.error("Failed to save organization:", error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to save organization.",
+      });
+    } finally {
+      setIsSavingOrg(false);
+    }
+  };
+
+  const handleCancelInvitation = async (invitationId: string) => {
+    try {
+      const success = await cancelInvitation(invitationId);
+      if (success) {
+        setPendingInvitations(pendingInvitations.filter((i) => i.id !== invitationId));
+        toast({ title: "Invitation cancelled" });
+      } else {
+        throw new Error("Failed to cancel invitation");
+      }
+    } catch (error) {
+      console.error("Failed to cancel invitation:", error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to cancel invitation.",
+      });
+    }
+  };
+
+  const getTypeIcon = (type: string) => {
+    switch (type) {
+      case "video":
+        return <Video className="h-4 w-4" />;
+      case "slides":
+      case "article":
+        return <FileText className="h-4 w-4" />;
+      default:
+        return <BookOpen className="h-4 w-4" />;
+    }
+  };
+
+  const getUserInitials = (name: string) => {
+    return name
+      .split(" ")
+      .map((n) => n[0])
+      .join("")
+      .toUpperCase()
+      .slice(0, 2);
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <Loader2 className="h-8 w-8 animate-spin text-brand-gold" />
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-full">
       <Header
         title="Admin Settings"
-        description="Manage waste definitions, training content, and users"
+        description="Manage waste types, training content, and users"
       />
 
       <div className="flex-1 p-6 overflow-auto">
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="mb-6">
-            <TabsTrigger value="waste-types">
-              <AlertTriangle className="h-4 w-4 mr-2" />
+            <TabsTrigger value="organization" className="flex items-center gap-2">
+              <Building className="h-4 w-4" />
+              Organization
+            </TabsTrigger>
+            <TabsTrigger value="waste-types" className="flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4" />
               Waste Types
             </TabsTrigger>
-            <TabsTrigger value="training">
-              <BookOpen className="h-4 w-4 mr-2" />
+            <TabsTrigger value="training" className="flex items-center gap-2">
+              <BookOpen className="h-4 w-4" />
               Training Content
             </TabsTrigger>
-            <TabsTrigger value="users">
-              <Users className="h-4 w-4 mr-2" />
+            <TabsTrigger value="users" className="flex items-center gap-2">
+              <Users className="h-4 w-4" />
               Users
             </TabsTrigger>
-            <TabsTrigger value="settings">
-              <Settings className="h-4 w-4 mr-2" />
-              Settings
-            </TabsTrigger>
           </TabsList>
+
+          {/* Organization Tab */}
+          <TabsContent value="organization">
+            {!organization ? (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Create Your Organization</CardTitle>
+                  <CardDescription>
+                    Set up your organization to start collaborating with your team
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex flex-col items-center justify-center py-8 space-y-4">
+                    <Building className="h-16 w-16 text-muted-foreground" />
+                    <p className="text-muted-foreground text-center max-w-md">
+                      You haven&apos;t created an organization yet. Create one to invite team members and start tracking waste in your processes.
+                    </p>
+                    <Dialog open={isCreateOrgDialogOpen} onOpenChange={setIsCreateOrgDialogOpen}>
+                      <DialogTrigger asChild>
+                        <Button className="bg-brand-gold hover:bg-brand-gold/90 text-brand-navy">
+                          <Plus className="mr-2 h-4 w-4" />
+                          Create Organization
+                        </Button>
+                      </DialogTrigger>
+                      <DialogContent>
+                        <DialogHeader>
+                          <DialogTitle>Create Organization</DialogTitle>
+                          <DialogDescription>
+                            Enter a name for your organization
+                          </DialogDescription>
+                        </DialogHeader>
+                        <div className="space-y-4 py-4">
+                          <div className="space-y-2">
+                            <Label>Organization Name</Label>
+                            <Input
+                              placeholder="e.g., Acme Corp"
+                              value={orgForm.name}
+                              onChange={(e) => setOrgForm({ name: e.target.value })}
+                            />
+                          </div>
+                        </div>
+                        <DialogFooter>
+                          <Button variant="outline" onClick={() => setIsCreateOrgDialogOpen(false)}>
+                            Cancel
+                          </Button>
+                          <Button
+                            onClick={handleSaveOrganization}
+                            disabled={isSavingOrg}
+                            className="bg-brand-gold hover:bg-brand-gold/90 text-brand-navy"
+                          >
+                            {isSavingOrg ? (
+                              <>
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                Creating...
+                              </>
+                            ) : (
+                              "Create"
+                            )}
+                          </Button>
+                        </DialogFooter>
+                      </DialogContent>
+                    </Dialog>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="space-y-6">
+                {/* Organization Info Card */}
+                <Card>
+                  <CardHeader className="flex flex-row items-center justify-between">
+                    <div>
+                      <CardTitle>{organization.name}</CardTitle>
+                      <CardDescription>
+                        Created on {new Date(organization.created_at).toLocaleDateString()}
+                      </CardDescription>
+                    </div>
+                    <Dialog open={isOrgDialogOpen} onOpenChange={setIsOrgDialogOpen}>
+                      <DialogTrigger asChild>
+                        <Button variant="outline">
+                          <Edit className="mr-2 h-4 w-4" />
+                          Edit
+                        </Button>
+                      </DialogTrigger>
+                      <DialogContent>
+                        <DialogHeader>
+                          <DialogTitle>Edit Organization</DialogTitle>
+                          <DialogDescription>
+                            Update your organization details
+                          </DialogDescription>
+                        </DialogHeader>
+                        <div className="space-y-4 py-4">
+                          <div className="space-y-2">
+                            <Label>Organization Name</Label>
+                            <Input
+                              value={orgForm.name}
+                              onChange={(e) => setOrgForm({ name: e.target.value })}
+                            />
+                          </div>
+                        </div>
+                        <DialogFooter>
+                          <Button variant="outline" onClick={() => setIsOrgDialogOpen(false)}>
+                            Cancel
+                          </Button>
+                          <Button
+                            onClick={handleSaveOrganization}
+                            disabled={isSavingOrg}
+                            className="bg-brand-gold hover:bg-brand-gold/90 text-brand-navy"
+                          >
+                            {isSavingOrg ? (
+                              <>
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                Saving...
+                              </>
+                            ) : (
+                              <>
+                                <Save className="mr-2 h-4 w-4" />
+                                Save Changes
+                              </>
+                            )}
+                          </Button>
+                        </DialogFooter>
+                      </DialogContent>
+                    </Dialog>
+                  </CardHeader>
+                  <CardContent>
+                    {orgStats && (
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div className="flex items-center gap-3 p-4 rounded-lg bg-muted/50">
+                          <div className="p-2 rounded-md bg-blue-500/10">
+                            <Users className="h-5 w-5 text-blue-500" />
+                          </div>
+                          <div>
+                            <p className="text-2xl font-bold">{orgStats.userCount}</p>
+                            <p className="text-sm text-muted-foreground">Team Members</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3 p-4 rounded-lg bg-muted/50">
+                          <div className="p-2 rounded-md bg-purple-500/10">
+                            <Workflow className="h-5 w-5 text-purple-500" />
+                          </div>
+                          <div>
+                            <p className="text-2xl font-bold">{orgStats.workflowCount}</p>
+                            <p className="text-sm text-muted-foreground">Workflows</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3 p-4 rounded-lg bg-muted/50">
+                          <div className="p-2 rounded-md bg-green-500/10">
+                            <ClipboardList className="h-5 w-5 text-green-500" />
+                          </div>
+                          <div>
+                            <p className="text-2xl font-bold">{orgStats.sessionCount}</p>
+                            <p className="text-sm text-muted-foreground">Sessions</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3 p-4 rounded-lg bg-muted/50">
+                          <div className="p-2 rounded-md bg-orange-500/10">
+                            <Eye className="h-5 w-5 text-orange-500" />
+                          </div>
+                          <div>
+                            <p className="text-2xl font-bold">{orgStats.observationCount}</p>
+                            <p className="text-sm text-muted-foreground">Observations</p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Pending Invitations Card */}
+                {pendingInvitations.length > 0 && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <Clock className="h-5 w-5 text-yellow-500" />
+                        Pending Invitations
+                      </CardTitle>
+                      <CardDescription>
+                        {pendingInvitations.length} invitation{pendingInvitations.length !== 1 ? "s" : ""} waiting to be accepted
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Email</TableHead>
+                            <TableHead>Role</TableHead>
+                            <TableHead>Status</TableHead>
+                            <TableHead>Sent</TableHead>
+                            <TableHead className="w-[70px]"></TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {pendingInvitations.map((invitation) => (
+                            <TableRow key={invitation.id}>
+                              <TableCell className="font-medium">{invitation.email}</TableCell>
+                              <TableCell>
+                                <Badge variant={getRoleBadgeVariant(invitation.role)}>
+                                  {getRoleDisplayName(invitation.role)}
+                                </Badge>
+                              </TableCell>
+                              <TableCell>
+                                <Badge
+                                  variant={
+                                    invitation.status === "pending"
+                                      ? "secondary"
+                                      : invitation.status === "failed"
+                                      ? "destructive"
+                                      : "outline"
+                                  }
+                                >
+                                  {invitation.status}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="text-muted-foreground">
+                                {new Date(invitation.created_at).toLocaleDateString()}
+                              </TableCell>
+                              <TableCell>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => handleCancelInvitation(invitation.id)}
+                                  title="Cancel invitation"
+                                >
+                                  <XCircle className="h-4 w-4 text-destructive" />
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
+            )}
+          </TabsContent>
 
           {/* Waste Types Tab */}
           <TabsContent value="waste-types">
             <Card>
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <CardTitle>Waste Type Definitions</CardTitle>
-                    <CardDescription>
-                      Manage the waste types available for tagging
-                    </CardDescription>
-                  </div>
-                  <Dialog
-                    open={isWasteDialogOpen}
-                    onOpenChange={setIsWasteDialogOpen}
-                  >
-                    <DialogTrigger asChild>
-                      <Button className="bg-brand-gold hover:bg-brand-gold/90 text-brand-navy">
-                        <Plus className="mr-2 h-4 w-4" />
-                        Add Waste Type
-                      </Button>
-                    </DialogTrigger>
-                    <DialogContent>
-                      <DialogHeader>
-                        <DialogTitle>Add Waste Type</DialogTitle>
-                        <DialogDescription>
-                          Create a new waste type definition
-                        </DialogDescription>
-                      </DialogHeader>
-                      <div className="space-y-4 py-4">
-                        <div className="grid grid-cols-2 gap-4">
-                          <div className="space-y-2">
-                            <Label>Code</Label>
-                            <Input placeholder="e.g., D, IW" />
-                          </div>
-                          <div className="space-y-2">
-                            <Label>Category</Label>
-                            <Select>
-                              <SelectTrigger>
-                                <SelectValue placeholder="Select category" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="core_lean">
-                                  Core Lean (DOWNTIME)
-                                </SelectItem>
-                                <SelectItem value="digital">Digital</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        </div>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <div>
+                  <CardTitle>Waste Type Definitions</CardTitle>
+                  <CardDescription>
+                    Manage the waste types used for tagging
+                  </CardDescription>
+                </div>
+                <Dialog
+                  open={isWasteDialogOpen}
+                  onOpenChange={(open) => {
+                    setIsWasteDialogOpen(open);
+                    if (!open) resetWasteForm();
+                  }}
+                >
+                  <DialogTrigger asChild>
+                    <Button className="bg-brand-gold hover:bg-brand-gold/90 text-brand-navy">
+                      <Plus className="mr-2 h-4 w-4" />
+                      Add Waste Type
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>
+                        {editingWasteType ? "Edit Waste Type" : "Add Waste Type"}
+                      </DialogTitle>
+                      <DialogDescription>
+                        {editingWasteType
+                          ? "Update waste type definition"
+                          : "Create a new waste type for tagging"}
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 py-4">
+                      <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-2">
-                          <Label>Name</Label>
-                          <Input placeholder="e.g., Defects" />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Description</Label>
-                          <Textarea placeholder="Describe this waste type..." />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Digital Examples (one per line)</Label>
-                          <Textarea
-                            placeholder="Data entry errors&#10;System bugs&#10;Incorrect file formats"
-                            rows={4}
+                          <Label>Code</Label>
+                          <Input
+                            placeholder="e.g., D, O, W"
+                            value={wasteForm.code}
+                            onChange={(e) =>
+                              setWasteForm({ ...wasteForm, code: e.target.value })
+                            }
                           />
                         </div>
+                        <div className="space-y-2">
+                          <Label>Category</Label>
+                          <Select
+                            value={wasteForm.category}
+                            onValueChange={(value: "core_lean" | "digital") =>
+                              setWasteForm({ ...wasteForm, category: value })
+                            }
+                          >
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="core_lean">Core Lean</SelectItem>
+                              <SelectItem value="digital">Digital</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
                       </div>
-                      <DialogFooter>
-                        <Button
-                          variant="outline"
-                          onClick={() => setIsWasteDialogOpen(false)}
-                        >
-                          Cancel
-                        </Button>
-                        <Button className="bg-brand-gold hover:bg-brand-gold/90 text-brand-navy">
-                          Create Waste Type
-                        </Button>
-                      </DialogFooter>
-                    </DialogContent>
-                  </Dialog>
-                </div>
+                      <div className="space-y-2">
+                        <Label>Name</Label>
+                        <Input
+                          placeholder="e.g., Defects"
+                          value={wasteForm.name}
+                          onChange={(e) =>
+                            setWasteForm({ ...wasteForm, name: e.target.value })
+                          }
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Description</Label>
+                        <Textarea
+                          placeholder="Describe this waste type..."
+                          value={wasteForm.description}
+                          onChange={(e) =>
+                            setWasteForm({ ...wasteForm, description: e.target.value })
+                          }
+                        />
+                      </div>
+                    </div>
+                    <DialogFooter>
+                      <Button
+                        variant="outline"
+                        onClick={() => setIsWasteDialogOpen(false)}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        onClick={handleSaveWasteType}
+                        className="bg-brand-gold hover:bg-brand-gold/90 text-brand-navy"
+                      >
+                        {editingWasteType ? "Update" : "Create"}
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
               </CardHeader>
               <CardContent>
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-16">Code</TableHead>
+                      <TableHead>Code</TableHead>
                       <TableHead>Name</TableHead>
                       <TableHead>Category</TableHead>
                       <TableHead>Description</TableHead>
-                      <TableHead>Examples</TableHead>
-                      <TableHead className="w-16"></TableHead>
+                      <TableHead className="w-[70px]"></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {mockWasteTypes.map((waste) => (
-                      <TableRow key={waste.id}>
+                    {wasteTypes.map((wt) => (
+                      <TableRow key={wt.id}>
                         <TableCell>
-                          <Badge variant="outline" className="font-mono">
-                            {waste.code}
-                          </Badge>
+                          <Badge variant="outline">{wt.code}</Badge>
                         </TableCell>
-                        <TableCell className="font-medium">
-                          {waste.name}
-                        </TableCell>
+                        <TableCell className="font-medium">{wt.name}</TableCell>
                         <TableCell>
                           <Badge
-                            variant="secondary"
-                            className={
-                              waste.category === "digital"
-                                ? "bg-purple-100 text-purple-700"
-                                : ""
+                            variant={
+                              wt.category === "core_lean" ? "secondary" : "default"
                             }
                           >
-                            {waste.category === "core_lean"
-                              ? "Core Lean"
-                              : "Digital"}
+                            {wt.category === "core_lean" ? "Core Lean" : "Digital"}
                           </Badge>
                         </TableCell>
                         <TableCell className="max-w-xs truncate">
-                          {waste.description}
-                        </TableCell>
-                        <TableCell>
-                          <span className="text-sm text-muted-foreground">
-                            {waste.examples.length} examples
-                          </span>
+                          {wt.description}
                         </TableCell>
                         <TableCell>
                           <DropdownMenu>
@@ -324,11 +888,16 @@ export default function AdminPage() {
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
-                              <DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => handleEditWasteType(wt)}
+                              >
                                 <Edit className="mr-2 h-4 w-4" />
                                 Edit
                               </DropdownMenuItem>
-                              <DropdownMenuItem className="text-destructive">
+                              <DropdownMenuItem
+                                className="text-destructive"
+                                onClick={() => handleDeleteWasteType(wt.id)}
+                              >
                                 <Trash2 className="mr-2 h-4 w-4" />
                                 Delete
                               </DropdownMenuItem>
@@ -346,41 +915,72 @@ export default function AdminPage() {
           {/* Training Content Tab */}
           <TabsContent value="training">
             <Card>
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <CardTitle>Training Content</CardTitle>
-                    <CardDescription>
-                      Manage videos, slides, articles, and quizzes
-                    </CardDescription>
-                  </div>
-                  <Dialog
-                    open={isContentDialogOpen}
-                    onOpenChange={setIsContentDialogOpen}
-                  >
-                    <DialogTrigger asChild>
-                      <Button className="bg-brand-gold hover:bg-brand-gold/90 text-brand-navy">
-                        <Upload className="mr-2 h-4 w-4" />
-                        Upload Content
-                      </Button>
-                    </DialogTrigger>
-                    <DialogContent>
-                      <DialogHeader>
-                        <DialogTitle>Upload Training Content</DialogTitle>
-                        <DialogDescription>
-                          Add a new training module
-                        </DialogDescription>
-                      </DialogHeader>
-                      <div className="space-y-4 py-4">
-                        <div className="space-y-2">
-                          <Label>Title</Label>
-                          <Input placeholder="Module title" />
-                        </div>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <div>
+                  <CardTitle>Training Content</CardTitle>
+                  <CardDescription>
+                    Manage training modules and content
+                  </CardDescription>
+                </div>
+                <Dialog
+                  open={isTrainingDialogOpen}
+                  onOpenChange={(open) => {
+                    setIsTrainingDialogOpen(open);
+                    if (!open) resetTrainingForm();
+                  }}
+                >
+                  <DialogTrigger asChild>
+                    <Button className="bg-brand-gold hover:bg-brand-gold/90 text-brand-navy">
+                      <Plus className="mr-2 h-4 w-4" />
+                      Add Content
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>
+                        {editingTraining ? "Edit Training Content" : "Add Training Content"}
+                      </DialogTitle>
+                      <DialogDescription>
+                        {editingTraining
+                          ? "Update training module"
+                          : "Create a new training module"}
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 py-4">
+                      <div className="space-y-2">
+                        <Label>Title</Label>
+                        <Input
+                          placeholder="Module title"
+                          value={trainingForm.title}
+                          onChange={(e) =>
+                            setTrainingForm({ ...trainingForm, title: e.target.value })
+                          }
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Description</Label>
+                        <Textarea
+                          placeholder="Module description..."
+                          value={trainingForm.description}
+                          onChange={(e) =>
+                            setTrainingForm({
+                              ...trainingForm,
+                              description: e.target.value,
+                            })
+                          }
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-2">
                           <Label>Type</Label>
-                          <Select>
+                          <Select
+                            value={trainingForm.type}
+                            onValueChange={(
+                              value: "video" | "slides" | "article" | "quiz"
+                            ) => setTrainingForm({ ...trainingForm, type: value })}
+                          >
                             <SelectTrigger>
-                              <SelectValue placeholder="Select type" />
+                              <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="video">Video</SelectItem>
@@ -391,156 +991,73 @@ export default function AdminPage() {
                           </Select>
                         </div>
                         <div className="space-y-2">
-                          <Label>Description</Label>
-                          <Textarea placeholder="Describe this module..." />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>File</Label>
-                          <div className="border-2 border-dashed rounded-lg p-6 text-center">
-                            <Upload className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
-                            <p className="text-sm text-muted-foreground">
-                              Click to upload or drag and drop
-                            </p>
-                          </div>
+                          <Label>Duration (minutes)</Label>
+                          <Input
+                            type="number"
+                            value={trainingForm.duration_minutes}
+                            onChange={(e) =>
+                              setTrainingForm({
+                                ...trainingForm,
+                                duration_minutes: parseInt(e.target.value) || 10,
+                              })
+                            }
+                          />
                         </div>
                       </div>
-                      <DialogFooter>
-                        <Button
-                          variant="outline"
-                          onClick={() => setIsContentDialogOpen(false)}
-                        >
-                          Cancel
-                        </Button>
-                        <Button className="bg-brand-gold hover:bg-brand-gold/90 text-brand-navy">
-                          Upload Content
-                        </Button>
-                      </DialogFooter>
-                    </DialogContent>
-                  </Dialog>
-                </div>
+                      <div className="space-y-2">
+                        <Label>Order Index</Label>
+                        <Input
+                          type="number"
+                          value={trainingForm.order_index}
+                          onChange={(e) =>
+                            setTrainingForm({
+                              ...trainingForm,
+                              order_index: parseInt(e.target.value) || 0,
+                            })
+                          }
+                        />
+                      </div>
+                    </div>
+                    <DialogFooter>
+                      <Button
+                        variant="outline"
+                        onClick={() => setIsTrainingDialogOpen(false)}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        onClick={handleSaveTraining}
+                        className="bg-brand-gold hover:bg-brand-gold/90 text-brand-navy"
+                      >
+                        {editingTraining ? "Update" : "Create"}
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
               </CardHeader>
               <CardContent>
                 <Table>
                   <TableHeader>
                     <TableRow>
+                      <TableHead>Order</TableHead>
                       <TableHead>Title</TableHead>
                       <TableHead>Type</TableHead>
                       <TableHead>Duration</TableHead>
-                      <TableHead>Last Updated</TableHead>
-                      <TableHead className="w-16"></TableHead>
+                      <TableHead className="w-[70px]"></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {mockTrainingContent.map((content) => {
-                      const Icon = getTypeIcon(content.type);
-                      return (
-                        <TableRow key={content.id}>
-                          <TableCell className="font-medium">
-                            <div className="flex items-center gap-2">
-                              <Icon className="h-4 w-4 text-muted-foreground" />
-                              {content.title}
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant="outline" className="capitalize">
-                              {content.type}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>{content.duration} min</TableCell>
-                          <TableCell>
-                            {new Date(content.updatedAt).toLocaleDateString()}
-                          </TableCell>
-                          <TableCell>
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="icon">
-                                  <MoreVertical className="h-4 w-4" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end">
-                                <DropdownMenuItem>
-                                  <Edit className="mr-2 h-4 w-4" />
-                                  Edit
-                                </DropdownMenuItem>
-                                <DropdownMenuItem className="text-destructive">
-                                  <Trash2 className="mr-2 h-4 w-4" />
-                                  Delete
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* Users Tab */}
-          <TabsContent value="users">
-            <Card>
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <CardTitle>User Management</CardTitle>
-                    <CardDescription>
-                      Manage user access and roles
-                    </CardDescription>
-                  </div>
-                  <Button className="bg-brand-gold hover:bg-brand-gold/90 text-brand-navy">
-                    <Plus className="mr-2 h-4 w-4" />
-                    Invite User
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Email</TableHead>
-                      <TableHead>Role</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="w-16"></TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {mockUsers.map((user) => (
-                      <TableRow key={user.id}>
-                        <TableCell className="font-medium">
-                          {user.name}
-                        </TableCell>
-                        <TableCell>{user.email}</TableCell>
+                    {trainingContent.map((tc) => (
+                      <TableRow key={tc.id}>
+                        <TableCell>{tc.order_index}</TableCell>
+                        <TableCell className="font-medium">{tc.title}</TableCell>
                         <TableCell>
-                          <Badge
-                            variant={
-                              user.role === "admin"
-                                ? "default"
-                                : user.role === "facilitator"
-                                ? "secondary"
-                                : "outline"
-                            }
-                            className={
-                              user.role === "admin"
-                                ? "bg-brand-navy"
-                                : user.role === "facilitator"
-                                ? "bg-brand-gold text-brand-navy"
-                                : ""
-                            }
-                          >
-                            {user.role}
-                          </Badge>
+                          <div className="flex items-center gap-2">
+                            {getTypeIcon(tc.type)}
+                            <span className="capitalize">{tc.type}</span>
+                          </div>
                         </TableCell>
-                        <TableCell>
-                          <Badge
-                            variant="outline"
-                            className="border-brand-emerald text-brand-emerald"
-                          >
-                            {user.status}
-                          </Badge>
-                        </TableCell>
+                        <TableCell>{tc.duration_minutes} min</TableCell>
                         <TableCell>
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
@@ -549,13 +1066,18 @@ export default function AdminPage() {
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
-                              <DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => handleEditTraining(tc)}
+                              >
                                 <Edit className="mr-2 h-4 w-4" />
-                                Edit Role
+                                Edit
                               </DropdownMenuItem>
-                              <DropdownMenuItem className="text-destructive">
+                              <DropdownMenuItem
+                                className="text-destructive"
+                                onClick={() => handleDeleteTraining(tc.id)}
+                              >
                                 <Trash2 className="mr-2 h-4 w-4" />
-                                Remove
+                                Delete
                               </DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>
@@ -568,77 +1090,265 @@ export default function AdminPage() {
             </Card>
           </TabsContent>
 
-          {/* Settings Tab */}
-          <TabsContent value="settings">
-            <div className="grid gap-6">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Organization Settings</CardTitle>
+          {/* Users Tab */}
+          <TabsContent value="users">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <div>
+                  <CardTitle>User Management</CardTitle>
                   <CardDescription>
-                    Configure your organization details
+                    Invite users and manage roles ({users.length} users)
                   </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="space-y-2">
-                    <Label>Organization Name</Label>
-                    <Input defaultValue="Versatex Solutions" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Logo</Label>
-                    <div className="flex items-center gap-4">
-                      <div className="w-16 h-16 rounded-lg bg-brand-gold flex items-center justify-center">
-                        <span className="text-2xl font-bold text-brand-navy">
-                          V
-                        </span>
+                </div>
+                <Dialog
+                  open={isUserDialogOpen}
+                  onOpenChange={(open) => {
+                    setIsUserDialogOpen(open);
+                    if (!open) resetInviteForm();
+                  }}
+                >
+                  <DialogTrigger asChild>
+                    <Button className="bg-brand-gold hover:bg-brand-gold/90 text-brand-navy">
+                      <Plus className="mr-2 h-4 w-4" />
+                      Invite User
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Invite User</DialogTitle>
+                      <DialogDescription>
+                        Send an invitation to join your organization
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 py-4">
+                      <div className="space-y-2">
+                        <Label>Email Address</Label>
+                        <div className="relative">
+                          <Mail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                          <Input
+                            type="email"
+                            placeholder="user@company.com"
+                            className="pl-10"
+                            value={inviteForm.email}
+                            onChange={(e) =>
+                              setInviteForm({ ...inviteForm, email: e.target.value })
+                            }
+                          />
+                        </div>
                       </div>
-                      <Button variant="outline">Change Logo</Button>
+                      <div className="space-y-2">
+                        <Label>Role</Label>
+                        <Select
+                          value={inviteForm.role}
+                          onValueChange={(value: UserRole) =>
+                            setInviteForm({ ...inviteForm, role: value })
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="participant">
+                              <div className="flex items-center gap-2">
+                                <Users className="h-4 w-4" />
+                                Participant
+                              </div>
+                            </SelectItem>
+                            <SelectItem value="facilitator">
+                              <div className="flex items-center gap-2">
+                                <UserCog className="h-4 w-4" />
+                                Facilitator
+                              </div>
+                            </SelectItem>
+                            <SelectItem value="admin">
+                              <div className="flex items-center gap-2">
+                                <Shield className="h-4 w-4" />
+                                Admin
+                              </div>
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {inviteForm.role === "admin" && "Full access to all features and settings"}
+                          {inviteForm.role === "facilitator" && "Can create and manage sessions and workflows"}
+                          {inviteForm.role === "participant" && "Can participate in sessions and view training"}
+                        </p>
+                      </div>
                     </div>
+                    <DialogFooter>
+                      <Button
+                        variant="outline"
+                        onClick={() => setIsUserDialogOpen(false)}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        onClick={handleInviteUser}
+                        disabled={isInviting}
+                        className="bg-brand-gold hover:bg-brand-gold/90 text-brand-navy"
+                      >
+                        {isInviting ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Inviting...
+                          </>
+                        ) : (
+                          "Send Invitation"
+                        )}
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+              </CardHeader>
+              <CardContent>
+                {users.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <Users className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                    <p>No users found.</p>
+                    <p className="text-sm">
+                      Invite users to get started.
+                    </p>
                   </div>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle>Auto-Save Settings</CardTitle>
-                  <CardDescription>
-                    Configure automatic saving behavior
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium">Auto-save observations</p>
-                      <p className="text-sm text-muted-foreground">
-                        Save observations automatically as users tag waste
-                      </p>
-                    </div>
-                    <Badge className="bg-brand-emerald">Enabled</Badge>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium">Session auto-save interval</p>
-                      <p className="text-sm text-muted-foreground">
-                        How often to save session state
-                      </p>
-                    </div>
-                    <Select defaultValue="10">
-                      <SelectTrigger className="w-32">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="5">5 seconds</SelectItem>
-                        <SelectItem value="10">10 seconds</SelectItem>
-                        <SelectItem value="30">30 seconds</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>User</TableHead>
+                        <TableHead>Email</TableHead>
+                        <TableHead>Role</TableHead>
+                        <TableHead>Joined</TableHead>
+                        <TableHead className="w-[70px]"></TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {users.map((user) => (
+                        <TableRow key={user.id}>
+                          <TableCell>
+                            <div className="flex items-center gap-3">
+                              <Avatar className="h-8 w-8">
+                                <AvatarImage src={user.avatar_url || undefined} />
+                                <AvatarFallback className="bg-brand-gold/20 text-brand-navy text-xs">
+                                  {getUserInitials(user.name)}
+                                </AvatarFallback>
+                              </Avatar>
+                              <div>
+                                <p className="font-medium">{user.name}</p>
+                                {user.id === currentUser?.id && (
+                                  <span className="text-xs text-muted-foreground">(You)</span>
+                                )}
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {user.email}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={getRoleBadgeVariant(user.role)}>
+                              {getRoleDisplayName(user.role)}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {new Date(user.created_at).toLocaleDateString()}
+                          </TableCell>
+                          <TableCell>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon">
+                                  <MoreVertical className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem
+                                  onClick={() => {
+                                    setEditingUser(user);
+                                    setIsRoleDialogOpen(true);
+                                  }}
+                                >
+                                  <UserCog className="mr-2 h-4 w-4" />
+                                  Change Role
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  className="text-destructive"
+                                  onClick={() => handleRemoveUser(user.id)}
+                                  disabled={user.id === currentUser?.id}
+                                >
+                                  <UserMinus className="mr-2 h-4 w-4" />
+                                  Remove from Org
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
           </TabsContent>
         </Tabs>
       </div>
+
+      {/* Role Change Dialog */}
+      <Dialog open={isRoleDialogOpen} onOpenChange={setIsRoleDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Change User Role</DialogTitle>
+            <DialogDescription>
+              Update the role for {editingUser?.name}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>New Role</Label>
+              <Select
+                defaultValue={editingUser?.role}
+                onValueChange={(value: UserRole) => {
+                  if (editingUser) {
+                    handleUpdateRole(editingUser.id, value);
+                  }
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="participant">
+                    <div className="flex items-center gap-2">
+                      <Users className="h-4 w-4" />
+                      Participant
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="facilitator">
+                    <div className="flex items-center gap-2">
+                      <UserCog className="h-4 w-4" />
+                      Facilitator
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="admin">
+                    <div className="flex items-center gap-2">
+                      <Shield className="h-4 w-4" />
+                      Admin
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setIsRoleDialogOpen(false);
+                setEditingUser(null);
+              }}
+            >
+              Cancel
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
-

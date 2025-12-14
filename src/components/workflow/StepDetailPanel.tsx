@@ -20,6 +20,7 @@ interface StepDetailPanelProps {
   isOpen: boolean;
   onClose: () => void;
   onStartTagging: () => void;
+  onEditObservation?: (observation: ObservationWithWasteTypes) => void;
   sessionActive?: boolean;
 }
 
@@ -29,6 +30,7 @@ export function StepDetailPanel({
   isOpen,
   onClose,
   onStartTagging,
+  onEditObservation,
   sessionActive = false,
 }: StepDetailPanelProps) {
   if (!step) return null;
@@ -148,13 +150,18 @@ export function StepDetailPanel({
                   {/* Recent Observations */}
                   <div>
                     <p className="text-xs text-muted-foreground mb-2">
-                      Recent Observations
+                      Recent Observations {onEditObservation && "(click to edit)"}
                     </p>
                     <div className="space-y-2">
-                      {observations.slice(0, 3).map((obs) => (
+                      {observations.slice(0, 5).map((obs) => (
                         <div
                           key={obs.id}
-                          className="p-3 rounded-lg border bg-white text-sm"
+                          className={`p-3 rounded-lg border bg-white text-sm transition-all ${
+                            onEditObservation
+                              ? "cursor-pointer hover:border-brand-gold hover:shadow-sm"
+                              : ""
+                          }`}
+                          onClick={() => onEditObservation?.(obs)}
                         >
                           <div className="flex items-center justify-between mb-1">
                             <div className="flex items-center gap-2">
@@ -183,6 +190,18 @@ export function StepDetailPanel({
                               {obs.notes}
                             </p>
                           )}
+                          <div className="flex flex-wrap gap-1 mt-2">
+                            {obs.waste_types?.slice(0, 3).map((wt) => (
+                              <Badge key={wt.id} variant="secondary" className="text-xs">
+                                {wt.code}
+                              </Badge>
+                            ))}
+                            {(obs.waste_types?.length || 0) > 3 && (
+                              <Badge variant="secondary" className="text-xs">
+                                +{(obs.waste_types?.length || 0) - 3}
+                              </Badge>
+                            )}
+                          </div>
                         </div>
                       ))}
                     </div>

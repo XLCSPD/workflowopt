@@ -1,140 +1,236 @@
-# Process Optimization Platform
+# Process Optimization Tool
 
-A comprehensive platform for identifying and eliminating waste in digital workflows using Lean methodology. Built with Next.js 14, Supabase, React Flow, and Tailwind CSS.
+A comprehensive Lean process improvement and waste walk facilitation platform built with Next.js, Supabase, and React Flow.
 
 ## Features
 
-- **Training Module**: Video, slides, articles, and quizzes for Lean waste education
-- **Workflow Viewer**: Interactive process maps with swimlanes using React Flow
-- **Waste Tagging**: Identify and score waste at each process step
-- **Session Management**: Collaborative waste walk sessions with real-time updates
-- **Analytics Dashboard**: Charts, heatmaps, and AI-generated insights
-- **Admin Console**: Manage waste types, training content, and users
-- **Export Reports**: PDF, CSV, and PPTX export options
+- **Training Modules** - Interactive Lean methodology training with progress tracking
+- **Workflow Management** - Visual process mapping with drag-and-drop workflow editor
+- **Waste Walk Sessions** - Real-time collaborative waste identification sessions
+- **Analytics Dashboard** - Comprehensive waste distribution charts and insights
+- **AI-Powered Insights** - Optional OpenAI/Anthropic integration for recommendations
+- **Export Reports** - Generate PDF and PowerPoint reports
+- **PWA Support** - Offline-capable progressive web app with data sync
+- **Role-Based Access** - Admin, Facilitator, and Participant roles
+- **Multi-tenant** - Organization-based data isolation
 
 ## Tech Stack
 
-| Layer | Technology |
-|-------|------------|
-| Framework | Next.js 14 (App Router) |
-| Language | TypeScript |
-| Styling | Tailwind CSS + Shadcn UI |
-| Database | Supabase (PostgreSQL) |
-| Auth | Supabase Auth |
-| Realtime | Supabase Realtime |
-| Workflow Viz | React Flow |
-| Charts | Recharts |
-| Forms | React Hook Form + Zod |
-| State | Zustand |
+- **Frontend**: Next.js 14, React 18, TypeScript
+- **UI**: Tailwind CSS, Shadcn/UI, Radix UI
+- **Backend**: Supabase (Auth, Database, Realtime)
+- **Visualization**: React Flow, Recharts
+- **State Management**: Zustand
+- **Forms**: React Hook Form, Zod validation
 
-## Getting Started
+## Quick Start
 
 ### Prerequisites
 
-- Node.js 18+
+- Node.js 18+ (20 recommended)
 - npm or yarn
 - Supabase account
 
-### Installation
+### 1. Clone and Install
 
-1. Clone the repository:
 ```bash
+git clone <repository-url>
 cd process-optimization-app
-```
-
-2. Install dependencies:
-```bash
 npm install
 ```
 
-3. Set up environment variables:
+### 2. Configure Supabase
+
+1. Create a new Supabase project at [supabase.com](https://supabase.com)
+2. Go to Project Settings > API
+3. Copy your project URL and anon key
+
+### 3. Set Environment Variables
+
 ```bash
-cp .env.local.example .env.local
+cp env.example .env.local
 ```
 
 Edit `.env.local` with your Supabase credentials:
-```
-NEXT_PUBLIC_SUPABASE_URL=your-supabase-project-url
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-supabase-anon-key
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+NEXT_PUBLIC_APP_URL=http://localhost:3000
 ```
 
-4. Set up the database:
-   - Go to your Supabase project's SQL Editor
-   - Run the SQL files in order:
-     - `supabase/schema.sql` - Creates tables, RLS policies, and seed waste types
-     - `supabase/seed-premier-health.sql` - Seeds the sample Premier Health workflow
+### 4. Initialize Database
 
-5. Run the development server:
+Run the SQL schema in your Supabase SQL Editor:
+
+```bash
+# Copy the contents of supabase/schema.sql
+# Paste into Supabase SQL Editor and run
+```
+
+### 5. Start Development Server
+
 ```bash
 npm run dev
 ```
 
-6. Open [http://localhost:3000](http://localhost:3000)
+Open [http://localhost:3000](http://localhost:3000)
+
+## Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `NEXT_PUBLIC_SUPABASE_URL` | Yes | Your Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Yes | Supabase anonymous/public key |
+| `SUPABASE_SERVICE_ROLE_KEY` | Yes | Service role key for admin operations |
+| `NEXT_PUBLIC_APP_URL` | Yes | Public URL (for redirects) |
+| `OPENAI_API_KEY` | No | OpenAI key for AI insights |
+| `ANTHROPIC_API_KEY` | No | Anthropic key for AI insights |
+
+## Database Setup
+
+### Schema
+
+The database schema is defined in `supabase/schema.sql` and includes:
+
+- **organizations** - Multi-tenant organization support
+- **users** - User profiles with roles
+- **processes** - Workflow definitions
+- **process_steps** - Individual workflow steps
+- **step_connections** - Flow connections between steps
+- **sessions** - Waste walk sessions
+- **observations** - Tagged waste observations
+- **waste_types** - DOWNTIME + Digital waste definitions
+- **training_content** - Training module definitions
+- **training_progress** - User training completion
+- **notifications** - User notifications
+- **session_insights** - AI-generated insights cache
+
+### Seed Data
+
+Sample data including waste types and training content is included in the schema. For additional test data:
+
+```sql
+-- Run in Supabase SQL Editor
+\i supabase/seed-premier-health.sql
+```
+
+## Docker Deployment
+
+### Build and Run
+
+```bash
+# Copy production environment
+cp env.production.example .env.production
+# Edit .env.production with your values
+
+# Build and start
+docker-compose up -d --build
+```
+
+### Using Pre-built Image
+
+```bash
+docker-compose up -d
+```
+
+### Health Check
+
+The app exposes a health endpoint at `/api/health`:
+
+```bash
+curl http://localhost:3000/api/health
+```
 
 ## Project Structure
 
 ```
 src/
-├── app/                          # Next.js App Router
-│   ├── (auth)/                   # Auth pages (login, register)
-│   ├── (dashboard)/              # Protected dashboard routes
-│   │   ├── dashboard/            # Main dashboard
-│   │   ├── training/             # Training module
-│   │   ├── workflows/            # Workflow library & viewer
-│   │   ├── sessions/             # Waste walk sessions
-│   │   ├── analytics/            # Analytics dashboard
-│   │   └── admin/                # Admin settings
-│   └── api/                      # API routes
-├── components/
-│   ├── ui/                       # Shadcn UI components
-│   ├── layout/                   # Layout components
-│   ├── workflow/                 # React Flow components
-│   ├── waste/                    # Waste tagging components
-│   └── analytics/                # Charts & heatmaps
-├── lib/
-│   ├── supabase/                 # Supabase client & helpers
-│   ├── stores/                   # Zustand stores
-│   └── utils.ts                  # Utilities
-└── types/                        # TypeScript types
+├── app/                    # Next.js App Router pages
+│   ├── (auth)/            # Authentication pages
+│   ├── (dashboard)/       # Protected dashboard pages
+│   └── api/               # API routes
+├── components/            # React components
+│   ├── layout/           # Layout components
+│   ├── ui/               # Shadcn UI components
+│   └── workflow/         # Workflow editor components
+├── lib/                   # Utilities and services
+│   ├── services/         # Supabase service functions
+│   ├── stores/           # Zustand stores
+│   ├── supabase/         # Supabase client configuration
+│   └── pwa/              # PWA utilities
+└── types/                # TypeScript type definitions
 ```
 
-## Key Features Explained
+## API Routes
 
-### Waste Types
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/health` | GET | Health check |
+| `/api/users/invite` | POST | Invite user to organization |
+| `/api/insights/generate` | POST | Generate AI insights |
+| `/api/export/pptx` | POST | Export session to PowerPoint |
+| `/api/observations/sync` | POST | Sync offline observations |
 
-The platform includes:
-- **DOWNTIME** (Core Lean): Defects, Overproduction, Waiting, Non-utilized Talent, Transportation, Inventory, Motion, Extra Processing
-- **Digital Wastes**: Integration Waste, Digital Overproduction, Unused Features, Excess Data, Fragmented Workflows, Digital Waiting
+## Testing
 
-### Priority Scoring
+```bash
+# Unit tests
+npm run test
 
-Observations are scored using the formula:
+# E2E tests
+npm run test:e2e
+
+# Test coverage
+npm run test:coverage
 ```
-Priority = Frequency × Impact × (6 - Ease)
+
+## PWA Icons
+
+Generate PWA icons from the base SVG:
+
+```bash
+# Install sharp for image generation
+npm install sharp --save-dev
+
+# Generate icons
+node scripts/generate-icons.js
 ```
 
-Where:
-- Frequency: How often the waste occurs (1-5)
-- Impact: Severity of the waste (1-5)
-- Ease: How easy it is to fix (1-5)
+Or use an online tool like [PWA Builder](https://www.pwabuilder.com/imageGenerator).
 
-### Heatmap
+## Rate Limiting
 
-The process map can display a heatmap overlay showing:
-- **Green**: Low priority (1-4)
-- **Yellow**: Medium priority (5-9)
-- **Orange**: High priority (10-14)
-- **Red**: Critical priority (15+)
+API routes are rate-limited:
 
-## Branding
+| Endpoint | Limit | Window |
+|----------|-------|--------|
+| User Invite | 10 | 1 hour |
+| AI Insights | 20 | 1 hour |
+| PPTX Export | 30 | 1 hour |
+| Observation Sync | 60 | 1 hour |
 
-The platform uses Versatex branding colors:
-- **Gold** (#FFC000): Primary brand color
-- **Charcoal** (#545454): Text and structure
-- **Navy** (#102A43): Accent and headers
-- **Emerald** (#219653): Success states
-- **Platinum** (#F0F4F8): Backgrounds
+## User Roles
+
+| Role | Permissions |
+|------|-------------|
+| **Admin** | Full access, user management, settings |
+| **Facilitator** | Create/manage sessions, workflows, view analytics |
+| **Participant** | Join sessions, tag waste, view training |
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit changes (`git commit -m 'Add amazing feature'`)
+4. Push to branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
 ## License
 
-Private - All rights reserved.
+This project is proprietary software. All rights reserved.
+
+## Support
+
+For support, please contact the development team or open an issue.

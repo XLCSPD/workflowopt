@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { Header } from "@/components/layout/Header";
 import { Button } from "@/components/ui/button";
@@ -22,8 +22,13 @@ import {
   Play,
   Clock,
   AlertTriangle,
+  Loader2,
 } from "lucide-react";
 import { useAuthStore } from "@/lib/stores/authStore";
+import { useToast } from "@/hooks/use-toast";
+import { getDashboardStats, getRecentSessions, getTopHotspots } from "@/lib/services/analytics";
+import { getOverallTrainingProgress, getTrainingContentWithProgress } from "@/lib/services/training";
+import { formatDistanceToNow } from "date-fns";
 
 interface DashboardStats {
   trainingProgress: number;
@@ -35,38 +40,96 @@ interface DashboardStats {
 interface RecentSession {
   id: string;
   name: string;
-  workflow: string;
+  workflow_name: string;
   status: string;
-  participantCount: number;
-  createdAt: string;
+  participant_count: number;
+  created_at: string;
+}
+
+interface TopHotspot {
+  rank: number;
+  step_name: string;
+  lane: string;
+  waste_types: string[];
+  priority_score: number;
+}
+
+interface TrainingModule {
+  id: string;
+  title: string;
+  status: "completed" | "in_progress" | "available" | "locked";
 }
 
 export default function DashboardPage() {
   const { user } = useAuthStore();
-  const [stats] = useState<DashboardStats>({
-    trainingProgress: 25,
-    totalWorkflows: 3,
-    activeSessions: 2,
-    wasteIdentified: 47,
+  const { toast } = useToast();
+  const [isLoading, setIsLoading] = useState(true);
+  const [stats, setStats] = useState<DashboardStats>({
+    trainingProgress: 0,
+    totalWorkflows: 0,
+    activeSessions: 0,
+    wasteIdentified: 0,
   });
-  const [recentSessions] = useState<RecentSession[]>([
-    {
-      id: "1",
-      name: "PH Procurement v1",
-      workflow: "Premier Health Workflow",
-      status: "active",
-      participantCount: 4,
-      createdAt: "2024-01-15",
-    },
-    {
-      id: "2",
-      name: "Claims Intake Review",
-      workflow: "Claims Processing",
-      status: "completed",
-      participantCount: 6,
-      createdAt: "2024-01-10",
-    },
-  ]);
+  const [recentSessions, setRecentSessions] = useState<RecentSession[]>([]);
+  const [topHotspots, setTopHotspots] = useState<TopHotspot[]>([]);
+  const [trainingModules, setTrainingModules] = useState<TrainingModule[]>([]);
+
+  // Fetch dashboard data
+  useEffect(() => {
+    const loadDashboard = async () => {
+      try {
+        setIsLoading(true);
+
+        const [dashboardStats, sessions, hotspots, trainingProgress, trainingContent] =
+          await Promise.all([
+            getDashboardStats(),
+            getRecentSessions(3),
+            getTopHotspots(undefined, 3),
+            getOverallTrainingProgress(),
+            getTrainingContentWithProgress(),
+          ]);
+
+        setStats({
+          trainingProgress: trainingProgress.percentage,
+          totalWorkflows: dashboardStats.totalWorkflows,
+          activeSessions: dashboardStats.activeSessions,
+          wasteIdentified: dashboardStats.wasteIdentified,
+        });
+
+        setRecentSessions(
+          sessions.map((s: { id: string; name: string; workflow_name?: string; process?: { name: string }; status: string; participant_count?: number; created_at: string }) => ({
+            id: s.id,
+            name: s.name,
+            workflow_name: s.workflow_name || s.process?.name || "Unknown Workflow",
+            status: s.status,
+            participant_count: s.participant_count || 0,
+            created_at: s.created_at,
+          }))
+        );
+
+        setTopHotspots(hotspots);
+
+        setTrainingModules(
+          trainingContent.slice(0, 3).map((m: { id: string; title: string; status: "completed" | "in_progress" | "available" | "locked" }) => ({
+            id: m.id,
+            title: m.title,
+            status: m.status,
+          }))
+        );
+      } catch (error) {
+        console.error("Failed to load dashboard:", error);
+        toast({
+          variant: "destructive",
+          title: "Error",
+          description: "Failed to load dashboard data.",
+        });
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadDashboard();
+  }, [toast]);
 
   const statCards = [
     {
@@ -106,6 +169,14 @@ export default function DashboardPage() {
       href: "/analytics",
     },
   ];
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <Loader2 className="h-8 w-8 animate-spin text-brand-gold" />
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-full">
@@ -182,39 +253,69 @@ export default function DashboardPage() {
               </div>
 
               <div className="space-y-3">
-                <div className="flex items-center justify-between p-3 rounded-lg bg-brand-platinum/50">
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-brand-emerald/20 flex items-center justify-center">
-                      <span className="text-brand-emerald text-sm">✓</span>
+                {trainingModules.map((module) => (
+                  <div
+                    key={module.id}
+                    className={`flex items-center justify-between p-3 rounded-lg ${
+                      module.status === "in_progress"
+                        ? "bg-brand-gold/10 border border-brand-gold/20"
+                        : "bg-brand-platinum/50"
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div
+                        className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                          module.status === "completed"
+                            ? "bg-brand-emerald/20"
+                            : module.status === "in_progress"
+                            ? "bg-brand-gold/20"
+                            : "bg-muted"
+                        }`}
+                      >
+                        {module.status === "completed" ? (
+                          <span className="text-brand-emerald text-sm">✓</span>
+                        ) : module.status === "in_progress" ? (
+                          <Play className="h-3 w-3 text-brand-gold" />
+                        ) : (
+                          <Clock className="h-3 w-3 text-muted-foreground" />
+                        )}
+                      </div>
+                      <span
+                        className={`text-sm ${
+                          module.status === "in_progress"
+                            ? "font-medium"
+                            : module.status === "locked"
+                            ? "text-muted-foreground"
+                            : ""
+                        }`}
+                      >
+                        {module.title}
+                      </span>
                     </div>
-                    <span className="text-sm">Introduction to Lean Waste</span>
+                    <Badge
+                      variant={
+                        module.status === "completed"
+                          ? "secondary"
+                          : module.status === "in_progress"
+                          ? "default"
+                          : "outline"
+                      }
+                      className={
+                        module.status === "completed"
+                          ? "bg-brand-emerald/10 text-brand-emerald"
+                          : module.status === "in_progress"
+                          ? "bg-brand-gold text-brand-navy"
+                          : ""
+                      }
+                    >
+                      {module.status === "completed"
+                        ? "Completed"
+                        : module.status === "in_progress"
+                        ? "In Progress"
+                        : "Upcoming"}
+                    </Badge>
                   </div>
-                  <Badge variant="secondary" className="bg-brand-emerald/10 text-brand-emerald">
-                    Completed
-                  </Badge>
-                </div>
-
-                <div className="flex items-center justify-between p-3 rounded-lg bg-brand-gold/10 border border-brand-gold/20">
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-brand-gold/20 flex items-center justify-center">
-                      <Play className="h-3 w-3 text-brand-gold" />
-                    </div>
-                    <span className="text-sm font-medium">DOWNTIME Wastes Explained</span>
-                  </div>
-                  <Badge className="bg-brand-gold text-brand-navy">In Progress</Badge>
-                </div>
-
-                <div className="flex items-center justify-between p-3 rounded-lg bg-brand-platinum/50">
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center">
-                      <Clock className="h-3 w-3 text-muted-foreground" />
-                    </div>
-                    <span className="text-sm text-muted-foreground">
-                      Digital Waste in Modern Workflows
-                    </span>
-                  </div>
-                  <Badge variant="outline">Upcoming</Badge>
-                </div>
+                ))}
               </div>
 
               <Button asChild variant="outline" className="w-full">
@@ -238,43 +339,57 @@ export default function DashboardPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              {recentSessions.map((session) => (
-                <Link
-                  key={session.id}
-                  href={`/sessions/${session.id}`}
-                  className="block"
-                >
-                  <div className="flex items-center justify-between p-4 rounded-lg border hover:bg-muted/50 transition-colors">
-                    <div className="space-y-1">
-                      <p className="font-medium text-brand-navy">{session.name}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {session.workflow}
-                      </p>
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <Users className="h-3 w-3" />
-                        {session.participantCount} participants
+              {recentSessions.length > 0 ? (
+                recentSessions.map((session) => (
+                  <Link
+                    key={session.id}
+                    href={`/sessions/${session.id}`}
+                    className="block"
+                  >
+                    <div className="flex items-center justify-between p-4 rounded-lg border hover:bg-muted/50 transition-colors">
+                      <div className="space-y-1">
+                        <p className="font-medium text-brand-navy">
+                          {session.name}
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          {session.workflow_name}
+                        </p>
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <Users className="h-3 w-3" />
+                          {session.participant_count} participants
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <Badge
+                          variant={
+                            session.status === "active" ? "default" : "secondary"
+                          }
+                          className={
+                            session.status === "active"
+                              ? "bg-brand-emerald text-white"
+                              : ""
+                          }
+                        >
+                          {session.status}
+                        </Badge>
+                        <p className="text-xs text-muted-foreground mt-2">
+                          {formatDistanceToNow(new Date(session.created_at), {
+                            addSuffix: true,
+                          })}
+                        </p>
                       </div>
                     </div>
-                    <div className="text-right">
-                      <Badge
-                        variant={
-                          session.status === "active" ? "default" : "secondary"
-                        }
-                        className={
-                          session.status === "active"
-                            ? "bg-brand-emerald text-white"
-                            : ""
-                        }
-                      >
-                        {session.status}
-                      </Badge>
-                      <p className="text-xs text-muted-foreground mt-2">
-                        {new Date(session.createdAt).toLocaleDateString()}
-                      </p>
-                    </div>
-                  </div>
-                </Link>
-              ))}
+                  </Link>
+                ))
+              ) : (
+                <div className="text-center py-8 text-muted-foreground">
+                  <Users className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                  <p>No sessions yet</p>
+                  <Button asChild variant="link" className="mt-2">
+                    <Link href="/sessions/new">Create your first session</Link>
+                  </Button>
+                </div>
+              )}
 
               <Button asChild variant="outline" className="w-full">
                 <Link href="/sessions">
@@ -298,42 +413,51 @@ export default function DashboardPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="space-y-3">
-              {[
-                { step: "Accounting Entry", waste: "Waiting", score: 18, lane: "Versatex" },
-                { step: "Create QR in IPEX", waste: "Defects", score: 15, lane: "Premier Health" },
-                { step: "Source Pricing", waste: "Integration Waste", score: 12, lane: "Versatex" },
-              ].map((item, index) => (
-                <div
-                  key={index}
-                  className="flex items-center justify-between p-3 rounded-lg border"
-                >
-                  <div className="flex items-center gap-4">
-                    <div
-                      className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-bold ${
-                        index === 0
-                          ? "bg-red-500"
-                          : index === 1
-                          ? "bg-orange-500"
-                          : "bg-yellow-500"
-                      }`}
-                    >
-                      {index + 1}
+            {topHotspots.length > 0 ? (
+              <div className="space-y-3">
+                {topHotspots.map((item) => (
+                  <div
+                    key={item.rank}
+                    className="flex items-center justify-between p-3 rounded-lg border"
+                  >
+                    <div className="flex items-center gap-4">
+                      <div
+                        className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-bold ${
+                          item.rank === 1
+                            ? "bg-red-500"
+                            : item.rank === 2
+                            ? "bg-orange-500"
+                            : "bg-yellow-500"
+                        }`}
+                      >
+                        {item.rank}
+                      </div>
+                      <div>
+                        <p className="font-medium">{item.step_name}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {item.lane} •{" "}
+                          {item.waste_types.slice(0, 2).join(", ")}
+                        </p>
+                      </div>
                     </div>
-                    <div>
-                      <p className="font-medium">{item.step}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {item.lane} • {item.waste}
+                    <div className="text-right">
+                      <p className="font-bold text-lg">{item.priority_score}</p>
+                      <p className="text-xs text-muted-foreground">
+                        Priority Score
                       </p>
                     </div>
                   </div>
-                  <div className="text-right">
-                    <p className="font-bold text-lg">{item.score}</p>
-                    <p className="text-xs text-muted-foreground">Priority Score</p>
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-8 text-muted-foreground">
+                <AlertTriangle className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                <p>No waste hotspots identified yet</p>
+                <p className="text-sm">
+                  Start a waste walk session to identify improvement opportunities
+                </p>
+              </div>
+            )}
 
             <Button asChild variant="outline" className="w-full mt-4">
               <Link href="/analytics">
@@ -347,4 +471,3 @@ export default function DashboardPage() {
     </div>
   );
 }
-
