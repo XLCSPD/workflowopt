@@ -625,16 +625,25 @@ export default function WorkflowDetailPage() {
                 >
                   <Edit className="mr-2 h-4 w-4" />
                   Edit
-            </Button>
-            <Button
-              asChild
-              className="bg-brand-gold hover:bg-brand-gold/90 text-brand-navy"
-            >
-              <Link href={`/sessions/new?workflow=${params.id}`}>
-                <Play className="mr-2 h-4 w-4" />
-                Start Waste Walk
-              </Link>
-            </Button>
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleExportPdf}
+                  className="bg-white"
+                >
+                  <Download className="mr-2 h-4 w-4" />
+                  Download PDF
+                </Button>
+                <Button
+                  asChild
+                  className="bg-brand-gold hover:bg-brand-gold/90 text-brand-navy"
+                >
+                  <Link href={`/sessions/new?workflow=${params.id}`}>
+                    <Play className="mr-2 h-4 w-4" />
+                    Start Waste Walk
+                  </Link>
+                </Button>
               </>
             )}
 
