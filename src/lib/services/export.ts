@@ -333,11 +333,13 @@ async function captureWorkflowPagedTiles(args: {
   zoom?: number;
   scale?: number;
   padding?: number;
+  overlapPx?: number;
 }): Promise<string[]> {
   const { chartElement, reactFlowInstance } = args;
   const zoom = args.zoom ?? 1;
   const scale = args.scale ?? 2;
   const padding = args.padding ?? 80;
+  const overlapPx = args.overlapPx ?? 72;
 
   const html2canvas = (await import("html2canvas")).default;
 
@@ -386,30 +388,48 @@ async function captureWorkflowPagedTiles(args: {
       chartElement.querySelector<HTMLElement>(".react-flow") ?? chartElement;
     const tileW = flowEl.clientWidth / zoom;
     const tileH = flowEl.clientHeight / zoom;
+    const overlapWorld = overlapPx / zoom;
+
+    // Step size between tiles. Overlap prevents nodes/edges being cut cleanly at page boundaries.
+    const stepW = Math.max(1, tileW - overlapWorld);
+    const stepH = Math.max(1, tileH - overlapWorld);
 
     const totalW = padded.maxX - padded.minX;
     const totalH = padded.maxY - padded.minY;
 
-    const cols = Math.max(1, Math.ceil(totalW / tileW));
-    const rows = Math.max(1, Math.ceil(totalH / tileH));
+    const cols = Math.max(1, Math.ceil(Math.max(0, totalW - overlapWorld) / stepW));
+    const rows = Math.max(1, Math.ceil(Math.max(0, totalH - overlapWorld) / stepH));
 
     const images: string[] = [];
 
     for (let row = 0; row < rows; row++) {
       for (let col = 0; col < cols; col++) {
-        const originX = padded.minX + col * tileW;
-        const originY = padded.minY + row * tileH;
+        // Clamp origin to ensure the last tile fully covers the end bounds.
+        const originX = Math.min(padded.minX + col * stepW, padded.maxX - tileW);
+        const originY = Math.min(padded.minY + row * stepH, padded.maxY - tileH);
 
         // React Flow transform: screen = (world * zoom) + translate
         reactFlowInstance.setViewport({ x: -originX * zoom, y: -originY * zoom, zoom }, { duration: 0 });
         await nextAnimationFrame();
         await nextAnimationFrame();
         // Give React Flow a moment to rerender edges after viewport changes.
-        await new Promise((r) => setTimeout(r, 60));
+        await new Promise((r) => setTimeout(r, 150));
+
+        // Crop capture height to content bounds to avoid massive blank space (which forces the image
+        // to shrink to fit the PDF height, hurting legibility).
+        const captureH = Math.min(
+          chartElement.clientHeight,
+          Math.ceil((totalH + padding * 2) * zoom)
+        );
 
         const canvas = await html2canvas(chartElement, {
           backgroundColor: "#ffffff",
           scale,
+          useCORS: true,
+          x: 0,
+          y: 0,
+          width: chartElement.clientWidth,
+          height: captureH,
         });
         images.push(canvas.toDataURL("image/png"));
       }
@@ -478,6 +498,7 @@ export async function exportWorkflowToPDF(args: {
         zoom: 1,
         scale: 2,
         padding: 120,
+        overlapPx: 84,
       });
 
       const pageWidth = doc.internal.pageSize.getWidth();
