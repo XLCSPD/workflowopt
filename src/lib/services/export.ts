@@ -279,6 +279,21 @@ function safePdfFilename(value: string): string {
   return base.endsWith(".pdf") ? base : `${base}.pdf`;
 }
 
+async function getImageAspectRatio(dataUrl: string): Promise<number | null> {
+  // Returns height / width
+  try {
+    // eslint-disable-next-line no-restricted-globals
+    const img = new Image();
+    img.decoding = "async";
+    img.src = dataUrl;
+    await img.decode();
+    if (!img.naturalWidth || !img.naturalHeight) return null;
+    return img.naturalHeight / img.naturalWidth;
+  } catch {
+    return null;
+  }
+}
+
 export async function exportWorkflowToPDF(args: {
   workflow: WorkflowExportWorkflow;
   steps: WorkflowExportStep[];
@@ -328,9 +343,10 @@ export async function exportWorkflowToPDF(args: {
       const maxW = pageWidth - margin * 2;
       const maxH = pageHeight - yPosition - 20;
 
-      // Maintain aspect ratio using an assumed 16:9-ish canvas; html2canvas gives exact pixels,
-      // but jsPDF needs points/mm; using a conservative fit avoids cropping.
-      const h = Math.min(maxH, (maxW * 9) / 16);
+      // Maintain aspect ratio based on the captured image.
+      // If we can't determine it, fall back to a conservative 16:9-ish ratio.
+      const aspect = (await getImageAspectRatio(img)) ?? 9 / 16;
+      const h = Math.min(maxH, maxW * aspect);
 
       doc.setDrawColor(230, 230, 230);
       doc.rect(margin, yPosition, maxW, h);
