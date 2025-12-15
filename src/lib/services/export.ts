@@ -1,6 +1,7 @@
 import { getSessionById } from "./sessions";
 import { getObservationsBySession } from "./observations";
 import { getWasteDistribution, getWasteByLane, getTopHotspots } from "./analytics";
+import type { ReactFlowInstance, Node as ReactFlowNode } from "reactflow";
 
 export interface ExportSections {
   wasteDistribution: boolean;
@@ -294,14 +295,124 @@ async function getImageAspectRatio(dataUrl: string): Promise<number | null> {
   }
 }
 
+function getReactFlowBounds(nodes: ReactFlowNode[]): { minX: number; minY: number; maxX: number; maxY: number } {
+  // Uses node width/height when available; falls back to reasonable defaults.
+  const fallbackW = 200;
+  const fallbackH = 90;
+
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+
+  for (const n of nodes) {
+    const pos = (n as unknown as { positionAbsolute?: { x: number; y: number } }).positionAbsolute ?? n.position;
+    const w = (n.width ?? (n as unknown as { measured?: { width?: number } }).measured?.width ?? fallbackW) as number;
+    const h = (n.height ?? (n as unknown as { measured?: { height?: number } }).measured?.height ?? fallbackH) as number;
+
+    minX = Math.min(minX, pos.x);
+    minY = Math.min(minY, pos.y);
+    maxX = Math.max(maxX, pos.x + w);
+    maxY = Math.max(maxY, pos.y + h);
+  }
+
+  if (!isFinite(minX) || !isFinite(minY) || !isFinite(maxX) || !isFinite(maxY)) {
+    return { minX: 0, minY: 0, maxX: 0, maxY: 0 };
+  }
+
+  return { minX, minY, maxX, maxY };
+}
+
+async function nextAnimationFrame(): Promise<void> {
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+}
+
+async function captureWorkflowPagedTiles(args: {
+  chartElement: HTMLElement;
+  reactFlowInstance: ReactFlowInstance;
+  zoom?: number;
+  scale?: number;
+  padding?: number;
+}): Promise<string[]> {
+  const { chartElement, reactFlowInstance } = args;
+  const zoom = args.zoom ?? 1;
+  const scale = args.scale ?? 2;
+  const padding = args.padding ?? 80;
+
+  const html2canvas = (await import("html2canvas")).default;
+
+  // Hide interactive overlays (controls/minimap/panels) during capture
+  const hideSelectors = [".react-flow__panel", ".react-flow__minimap"];
+  const hidden: Array<{ el: HTMLElement; visibility: string }> = [];
+  for (const sel of hideSelectors) {
+    chartElement.querySelectorAll<HTMLElement>(sel).forEach((el) => {
+      hidden.push({ el, visibility: el.style.visibility });
+      el.style.visibility = "hidden";
+    });
+  }
+
+  const originalViewport = reactFlowInstance.getViewport();
+
+  try {
+    const nodes = reactFlowInstance.getNodes();
+    const { minX, minY, maxX, maxY } = getReactFlowBounds(nodes as unknown as ReactFlowNode[]);
+
+    const padded = {
+      minX: minX - padding,
+      minY: minY - padding,
+      maxX: maxX + padding,
+      maxY: maxY + padding,
+    };
+
+    // Use the current on-screen chart element size as our tile viewport size
+    const tileW = chartElement.clientWidth / zoom;
+    const tileH = chartElement.clientHeight / zoom;
+
+    const totalW = padded.maxX - padded.minX;
+    const totalH = padded.maxY - padded.minY;
+
+    const cols = Math.max(1, Math.ceil(totalW / tileW));
+    const rows = Math.max(1, Math.ceil(totalH / tileH));
+
+    const images: string[] = [];
+
+    for (let row = 0; row < rows; row++) {
+      for (let col = 0; col < cols; col++) {
+        const originX = padded.minX + col * tileW;
+        const originY = padded.minY + row * tileH;
+
+        // React Flow transform: screen = (world * zoom) + translate
+        reactFlowInstance.setViewport({ x: -originX * zoom, y: -originY * zoom, zoom }, { duration: 0 });
+        await nextAnimationFrame();
+        await nextAnimationFrame();
+
+        const canvas = await html2canvas(chartElement, {
+          backgroundColor: "#ffffff",
+          scale,
+        });
+        images.push(canvas.toDataURL("image/png"));
+      }
+    }
+
+    return images;
+  } finally {
+    // Restore viewport and overlays
+    reactFlowInstance.setViewport(originalViewport, { duration: 0 });
+    for (const h of hidden) {
+      h.el.style.visibility = h.visibility;
+    }
+  }
+}
+
 export async function exportWorkflowToPDF(args: {
   workflow: WorkflowExportWorkflow;
   steps: WorkflowExportStep[];
   connections: WorkflowExportConnection[];
   filename?: string;
   chartElementId?: string;
+  reactFlowInstance?: ReactFlowInstance;
 }): Promise<void> {
-  const { workflow, steps, connections, filename, chartElementId } = args;
+  const { workflow, steps, connections, filename, chartElementId, reactFlowInstance } = args;
 
   // Dynamic imports to avoid bundling issues
   const jsPDFModule = await import("jspdf");
@@ -309,7 +420,8 @@ export async function exportWorkflowToPDF(args: {
   const autoTableModule = await import("jspdf-autotable");
   const autoTable = autoTableModule.default;
 
-  const doc = new jsPDF();
+  // Use landscape to make workflow pages more legible.
+  const doc = new jsPDF({ orientation: "landscape" });
   // Ensure autoTable is attached
   void autoTable;
 
@@ -335,23 +447,65 @@ export async function exportWorkflowToPDF(args: {
 
   // Optional: process map snapshot
   if (chartElementId) {
-    const img = await captureChartAsImage(chartElementId);
-    if (img) {
+    const chartEl = document.getElementById(chartElementId);
+    if (chartEl && reactFlowInstance) {
+      // Capture the full workflow across multiple pages (tiled) for legibility.
+      const tiles = await captureWorkflowPagedTiles({
+        chartElement: chartEl,
+        reactFlowInstance,
+        zoom: 1,
+        scale: 2,
+        padding: 120,
+      });
+
       const pageWidth = doc.internal.pageSize.getWidth();
       const pageHeight = doc.internal.pageSize.getHeight();
       const margin = 15;
-      const maxW = pageWidth - margin * 2;
-      const maxH = pageHeight - yPosition - 20;
 
-      // Maintain aspect ratio based on the captured image.
-      // If we can't determine it, fall back to a conservative 16:9-ish ratio.
-      const aspect = (await getImageAspectRatio(img)) ?? 9 / 16;
-      const h = Math.min(maxH, maxW * aspect);
+      for (let i = 0; i < tiles.length; i++) {
+        const tileImg = tiles[i];
+        const yStart = i === 0 ? yPosition : margin;
+        const maxW = pageWidth - margin * 2;
+        const maxH = pageHeight - yStart - margin;
 
-      doc.setDrawColor(230, 230, 230);
-      doc.rect(margin, yPosition, maxW, h);
-      doc.addImage(img, "PNG", margin, yPosition, maxW, h);
-      yPosition += h + 12;
+        const aspect = (await getImageAspectRatio(tileImg)) ?? 9 / 16;
+        let drawW = maxW;
+        let drawH = drawW * aspect;
+        if (drawH > maxH) {
+          drawH = maxH;
+          drawW = drawH / aspect;
+        }
+
+        doc.setDrawColor(230, 230, 230);
+        doc.rect(margin, yStart, drawW, drawH);
+        doc.addImage(tileImg, "PNG", margin, yStart, drawW, drawH);
+
+        if (i < tiles.length - 1) {
+          doc.addPage("a4", "landscape");
+        }
+      }
+
+      // Start tables on a fresh page after the full workflow image.
+      doc.addPage("a4", "landscape");
+      yPosition = 20;
+    } else {
+      // Fallback: single-page snapshot (fits current viewport)
+      const img = await captureChartAsImage(chartElementId);
+      if (img) {
+        const pageWidth = doc.internal.pageSize.getWidth();
+        const pageHeight = doc.internal.pageSize.getHeight();
+        const margin = 15;
+        const maxW = pageWidth - margin * 2;
+        const maxH = pageHeight - yPosition - 20;
+
+        const aspect = (await getImageAspectRatio(img)) ?? 9 / 16;
+        const h = Math.min(maxH, maxW * aspect);
+
+        doc.setDrawColor(230, 230, 230);
+        doc.rect(margin, yPosition, maxW, h);
+        doc.addImage(img, "PNG", margin, yPosition, maxW, h);
+        yPosition += h + 12;
+      }
     }
   }
 

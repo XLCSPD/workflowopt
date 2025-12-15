@@ -9,6 +9,7 @@ import ReactFlow, {
   useReactFlow,
   useViewport,
   ReactFlowProvider,
+  ReactFlowInstance,
   Node,
   Edge,
   NodeChange,
@@ -42,6 +43,7 @@ interface ProcessMapProps {
   isEditMode?: boolean;
   onConnect?: (sourceId: string, targetId: string) => void;
   onDeleteConnection?: (sourceId: string, targetId: string) => void;
+  onReactFlowInit?: (instance: ReactFlowInstance) => void;
 }
 
 // Helper to get localStorage key for a workflow
@@ -140,6 +142,7 @@ function ProcessMapInner({
   isEditMode = false,
   onConnect,
   onDeleteConnection,
+  onReactFlowInit,
 }: ProcessMapProps) {
   const { fitView, zoomIn, zoomOut } = useReactFlow();
   const viewport = useViewport();
@@ -438,6 +441,7 @@ function ProcessMapInner({
           edges={edges}
           onNodesChange={handleNodesChange}
           onEdgesChange={onEdgesChange}
+          onInit={onReactFlowInit}
           nodeTypes={nodeTypes}
           connectionMode={ConnectionMode.Loose}
           fitView

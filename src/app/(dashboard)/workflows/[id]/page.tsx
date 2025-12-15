@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { Header } from "@/components/layout/Header";
@@ -51,6 +51,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { getWorkflowWithDetails } from "@/lib/services/workflows";
 import { exportWorkflowToPDF } from "@/lib/services/export";
+import type { ReactFlowInstance } from "reactflow";
 import {
   createStep,
   updateStep,
@@ -73,6 +74,7 @@ export default function WorkflowDetailPage() {
   const params = useParams();
   const router = useRouter();
   const { toast } = useToast();
+  const reactFlowInstanceRef = useRef<ReactFlowInstance | null>(null);
 
   const [isLoading, setIsLoading] = useState(true);
   const [workflow, setWorkflow] = useState<Process | null>(null);
@@ -541,6 +543,7 @@ export default function WorkflowDetailPage() {
         connections,
         filename: `${sanitizeFilenamePart(workflow.name || "workflow") || "workflow"}.pdf`,
         chartElementId: "workflow-process-map-export",
+        reactFlowInstance: reactFlowInstanceRef.current || undefined,
       });
     } catch (error) {
       console.error("Failed to export PDF:", error);
@@ -749,6 +752,9 @@ export default function WorkflowDetailPage() {
             isEditMode={isEditMode}
             onConnect={handleConnect}
             onDeleteConnection={handleDeleteConnection}
+            onReactFlowInit={(instance) => {
+              reactFlowInstanceRef.current = instance;
+            }}
           />
         ) : (
           <div className="flex flex-col items-center justify-center h-full text-center p-6">
