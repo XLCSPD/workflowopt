@@ -341,6 +341,21 @@ async function captureWorkflowPagedTiles(args: {
 
   const html2canvas = (await import("html2canvas")).default;
 
+  // Ensure fonts are loaded before measuring/rendering text to canvas.
+  // This helps avoid clipped text from late font swaps.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const fonts = (document as any).fonts as { ready?: Promise<unknown> } | undefined;
+  if (fonts?.ready) {
+    try {
+      await fonts.ready;
+    } catch {
+      // ignore
+    }
+  }
+
+  // Temporarily adjust CSS for export to avoid line-clamp text clipping.
+  document.documentElement.classList.add("workflow-exporting");
+
   // Hide interactive overlays (controls/minimap/panels) during capture
   const hideSelectors = [".react-flow__panel", ".react-flow__minimap"];
   const hidden: Array<{ el: HTMLElement; visibility: string }> = [];
@@ -364,9 +379,13 @@ async function captureWorkflowPagedTiles(args: {
       maxY: maxY + padding,
     };
 
-    // Use the current on-screen chart element size as our tile viewport size
-    const tileW = chartElement.clientWidth / zoom;
-    const tileH = chartElement.clientHeight / zoom;
+    // IMPORTANT: the chartElement wrapper includes the left swimlane label column.
+    // Use the actual React Flow canvas dimensions to determine how much world space each page covers,
+    // otherwise we skip columns and edges appear “missing”.
+    const flowEl =
+      chartElement.querySelector<HTMLElement>(".react-flow") ?? chartElement;
+    const tileW = flowEl.clientWidth / zoom;
+    const tileH = flowEl.clientHeight / zoom;
 
     const totalW = padded.maxX - padded.minX;
     const totalH = padded.maxY - padded.minY;
@@ -385,6 +404,8 @@ async function captureWorkflowPagedTiles(args: {
         reactFlowInstance.setViewport({ x: -originX * zoom, y: -originY * zoom, zoom }, { duration: 0 });
         await nextAnimationFrame();
         await nextAnimationFrame();
+        // Give React Flow a moment to rerender edges after viewport changes.
+        await new Promise((r) => setTimeout(r, 60));
 
         const canvas = await html2canvas(chartElement, {
           backgroundColor: "#ffffff",
@@ -401,6 +422,7 @@ async function captureWorkflowPagedTiles(args: {
     for (const h of hidden) {
       h.el.style.visibility = h.visibility;
     }
+    document.documentElement.classList.remove("workflow-exporting");
   }
 }
 

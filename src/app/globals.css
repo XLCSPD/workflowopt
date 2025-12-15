@@ -122,6 +122,18 @@
   box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
 }
 
+/* Improve PDF exports of React Flow (avoid text clipping) */
+.workflow-exporting .react-flow__node p {
+  line-height: 1.25 !important;
+}
+
+.workflow-exporting .react-flow__node .line-clamp-1,
+.workflow-exporting .react-flow__node .line-clamp-2 {
+  display: block !important;
+  -webkit-line-clamp: unset !important;
+  overflow: visible !important;
+}
+
 /* Heatmap color scale */
 .heatmap-low {
   background-color: hsl(145 64% 80%);
