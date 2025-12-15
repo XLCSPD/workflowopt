@@ -1,14 +1,22 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Sidebar, MobileSidebarTrigger } from "@/components/layout/Sidebar";
 import { useAuthStore } from "@/lib/stores/authStore";
 import { getSupabaseClient } from "@/lib/supabase/client";
-import { Loader2 } from "lucide-react";
+import { BookOpen, Loader2 } from "lucide-react";
 import type { User } from "@/types";
 import { VersatexLogo } from "@/components/branding/VersatexLogo";
+import { WasteCheatSheetModal } from "@/components/waste/WasteCheatSheetModal";
+import { Button } from "@/components/ui/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 export default function DashboardLayout({
   children,
@@ -18,6 +26,7 @@ export default function DashboardLayout({
   const router = useRouter();
   const { isLoading, setUser, setLoading } = useAuthStore();
   const supabase = getSupabaseClient();
+  const [isWasteCheatSheetOpen, setIsWasteCheatSheetOpen] = useState(false);
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -103,6 +112,38 @@ export default function DashboardLayout({
         {/* Page Content */}
         <main className="flex-1 overflow-auto">{children}</main>
       </div>
+
+      {/* Floating Waste Types Quick Reference */}
+      <TooltipProvider>
+        <div
+          className={[
+            "fixed z-50",
+            "bottom-[calc(1rem+env(safe-area-inset-bottom))]",
+            "right-[calc(1rem+env(safe-area-inset-right))]",
+            "md:bottom-[calc(1.5rem+env(safe-area-inset-bottom))]",
+            "md:right-[calc(1.5rem+env(safe-area-inset-right))]",
+          ].join(" ")}
+        >
+          <Tooltip delayDuration={0}>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                size="icon"
+                onClick={() => setIsWasteCheatSheetOpen(true)}
+                className="h-12 w-12 rounded-full bg-white shadow-lg border border-border hover:bg-brand-gold/10"
+                aria-label="Open Waste Types cheat sheet"
+              >
+                <BookOpen className="h-5 w-5 text-brand-navy" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="left" className="font-medium">
+              Waste Types
+            </TooltipContent>
+          </Tooltip>
+        </div>
+      </TooltipProvider>
+
+      <WasteCheatSheetModal open={isWasteCheatSheetOpen} onOpenChange={setIsWasteCheatSheetOpen} />
     </div>
   );
 }
