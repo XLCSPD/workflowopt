@@ -327,24 +327,22 @@ async function nextAnimationFrame(): Promise<void> {
   await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 }
 
-async function captureWorkflowPagedTiles(args: {
+/**
+ * Captures the entire workflow as a single large image using fitView.
+ * This ensures swimlane backgrounds and edges are properly synchronized
+ * because fitView triggers React's state update cycle.
+ */
+async function captureWorkflowFullImage(args: {
   chartElement: HTMLElement;
   reactFlowInstance: ReactFlowInstance;
-  zoom?: number;
-  scale?: number;
-  padding?: number;
-  overlapPx?: number;
-}): Promise<string[]> {
+  canvasScale?: number;
+}): Promise<{ dataUrl: string; width: number; height: number }> {
   const { chartElement, reactFlowInstance } = args;
-  const zoom = args.zoom ?? 1;
-  const scale = args.scale ?? 2;
-  const padding = args.padding ?? 80;
-  const overlapPx = args.overlapPx ?? 72;
+  const canvasScale = args.canvasScale ?? 2;
 
   const html2canvas = (await import("html2canvas")).default;
 
-  // Ensure fonts are loaded before measuring/rendering text to canvas.
-  // This helps avoid clipped text from late font swaps.
+  // Ensure fonts are loaded
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fonts = (document as any).fonts as { ready?: Promise<unknown> } | undefined;
   if (fonts?.ready) {
@@ -355,10 +353,10 @@ async function captureWorkflowPagedTiles(args: {
     }
   }
 
-  // Temporarily adjust CSS for export to avoid line-clamp text clipping.
+  // Add export class for CSS overrides (removes line-clamp, etc.)
   document.documentElement.classList.add("workflow-exporting");
 
-  // Hide interactive overlays (controls/minimap/panels) during capture
+  // Hide interactive overlays during capture
   const hideSelectors = [".react-flow__panel", ".react-flow__minimap"];
   const hidden: Array<{ el: HTMLElement; visibility: string }> = [];
   for (const sel of hideSelectors) {
@@ -371,71 +369,28 @@ async function captureWorkflowPagedTiles(args: {
   const originalViewport = reactFlowInstance.getViewport();
 
   try {
-    const nodes = reactFlowInstance.getNodes();
-    const { minX, minY, maxX, maxY } = getReactFlowBounds(nodes as unknown as ReactFlowNode[]);
+    // Use fitView to show entire workflow - this properly syncs swimlane backgrounds
+    // because it triggers React's state update cycle via useViewport hook
+    reactFlowInstance.fitView({ padding: 0.1, duration: 0 });
 
-    const padded = {
-      minX: minX - padding,
-      minY: minY - padding,
-      maxX: maxX + padding,
-      maxY: maxY + padding,
+    // Wait for React to fully re-render with new viewport
+    await nextAnimationFrame();
+    await nextAnimationFrame();
+    await new Promise((r) => setTimeout(r, 350));
+
+    const canvas = await html2canvas(chartElement, {
+      backgroundColor: "#ffffff",
+      scale: canvasScale,
+      useCORS: true,
+      width: chartElement.clientWidth,
+      height: chartElement.clientHeight,
+    });
+
+    return {
+      dataUrl: canvas.toDataURL("image/png"),
+      width: canvas.width,
+      height: canvas.height,
     };
-
-    // IMPORTANT: the chartElement wrapper includes the left swimlane label column.
-    // Use the actual React Flow canvas dimensions to determine how much world space each page covers,
-    // otherwise we skip columns and edges appear “missing”.
-    const flowEl =
-      chartElement.querySelector<HTMLElement>(".react-flow") ?? chartElement;
-    const tileW = flowEl.clientWidth / zoom;
-    const tileH = flowEl.clientHeight / zoom;
-    const overlapWorld = overlapPx / zoom;
-
-    // Step size between tiles. Overlap prevents nodes/edges being cut cleanly at page boundaries.
-    const stepW = Math.max(1, tileW - overlapWorld);
-    const stepH = Math.max(1, tileH - overlapWorld);
-
-    const totalW = padded.maxX - padded.minX;
-    const totalH = padded.maxY - padded.minY;
-
-    const cols = Math.max(1, Math.ceil(Math.max(0, totalW - overlapWorld) / stepW));
-    const rows = Math.max(1, Math.ceil(Math.max(0, totalH - overlapWorld) / stepH));
-
-    const images: string[] = [];
-
-    for (let row = 0; row < rows; row++) {
-      for (let col = 0; col < cols; col++) {
-        // Clamp origin to ensure the last tile fully covers the end bounds.
-        const originX = Math.min(padded.minX + col * stepW, padded.maxX - tileW);
-        const originY = Math.min(padded.minY + row * stepH, padded.maxY - tileH);
-
-        // React Flow transform: screen = (world * zoom) + translate
-        reactFlowInstance.setViewport({ x: -originX * zoom, y: -originY * zoom, zoom }, { duration: 0 });
-        await nextAnimationFrame();
-        await nextAnimationFrame();
-        // Give React Flow a moment to rerender edges after viewport changes.
-        await new Promise((r) => setTimeout(r, 150));
-
-        // Crop capture height to content bounds to avoid massive blank space (which forces the image
-        // to shrink to fit the PDF height, hurting legibility).
-        const captureH = Math.min(
-          chartElement.clientHeight,
-          Math.ceil((totalH + padding * 2) * zoom)
-        );
-
-        const canvas = await html2canvas(chartElement, {
-          backgroundColor: "#ffffff",
-          scale,
-          useCORS: true,
-          x: 0,
-          y: 0,
-          width: chartElement.clientWidth,
-          height: captureH,
-        });
-        images.push(canvas.toDataURL("image/png"));
-      }
-    }
-
-    return images;
   } finally {
     // Restore viewport and overlays
     reactFlowInstance.setViewport(originalViewport, { duration: 0 });
@@ -444,6 +399,83 @@ async function captureWorkflowPagedTiles(args: {
     }
     document.documentElement.classList.remove("workflow-exporting");
   }
+}
+
+/**
+ * Splits a large image into page-sized tiles for PDF export.
+ * Uses overlap to prevent content from being cut at page boundaries.
+ * Pages are generated left-to-right, then top-to-bottom (reading order).
+ */
+function splitImageIntoPages(
+  fullImage: { dataUrl: string; width: number; height: number },
+  pageWidth: number,
+  pageHeight: number,
+  overlapPx: number = 150
+): Promise<string[]> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const pages: string[] = [];
+
+      // If the image fits in a single page, just return it
+      if (fullImage.width <= pageWidth && fullImage.height <= pageHeight) {
+        pages.push(fullImage.dataUrl);
+        resolve(pages);
+        return;
+      }
+
+      // Calculate step size (how much we advance per page, accounting for overlap)
+      const stepX = Math.max(1, pageWidth - overlapPx);
+      const stepY = Math.max(1, pageHeight - overlapPx);
+
+      // Calculate number of pages needed
+      const cols = fullImage.width <= pageWidth ? 1 : Math.max(1, Math.ceil((fullImage.width - overlapPx) / stepX));
+      const rows = fullImage.height <= pageHeight ? 1 : Math.max(1, Math.ceil((fullImage.height - overlapPx) / stepY));
+
+      for (let row = 0; row < rows; row++) {
+        for (let col = 0; col < cols; col++) {
+          // Calculate source position, clamping to ensure we capture the end
+          const srcX = Math.min(col * stepX, Math.max(0, fullImage.width - pageWidth));
+          const srcY = Math.min(row * stepY, Math.max(0, fullImage.height - pageHeight));
+
+          // Calculate actual dimensions to capture (may be smaller at edges)
+          const captureW = Math.min(pageWidth, fullImage.width - srcX);
+          const captureH = Math.min(pageHeight, fullImage.height - srcY);
+
+          // Create canvas for this page
+          const pageCanvas = document.createElement("canvas");
+          pageCanvas.width = captureW;
+          pageCanvas.height = captureH;
+          const ctx = pageCanvas.getContext("2d");
+
+          if (ctx) {
+            // Fill with white background
+            ctx.fillStyle = "#ffffff";
+            ctx.fillRect(0, 0, captureW, captureH);
+
+            // Draw the portion of the full image
+            ctx.drawImage(
+              img,
+              srcX,
+              srcY,
+              captureW,
+              captureH,
+              0,
+              0,
+              captureW,
+              captureH
+            );
+
+            pages.push(pageCanvas.toDataURL("image/png"));
+          }
+        }
+      }
+
+      resolve(pages);
+    };
+    img.onerror = reject;
+    img.src = fullImage.dataUrl;
+  });
 }
 
 export async function exportWorkflowToPDF(args: {
@@ -491,19 +523,30 @@ export async function exportWorkflowToPDF(args: {
   if (chartElementId) {
     const chartEl = document.getElementById(chartElementId);
     if (chartEl && reactFlowInstance) {
-      // Capture the full workflow across multiple pages (tiled) for legibility.
-      const tiles = await captureWorkflowPagedTiles({
+      // Capture the full workflow as a single large image
+      const fullImage = await captureWorkflowFullImage({
         chartElement: chartEl,
         reactFlowInstance,
-        zoom: 1,
-        scale: 2,
-        padding: 120,
-        overlapPx: 84,
+        canvasScale: 2,
       });
 
       const pageWidth = doc.internal.pageSize.getWidth();
       const pageHeight = doc.internal.pageSize.getHeight();
       const margin = 15;
+
+      // Calculate the drawable area in pixels (at scale 2)
+      // We need to convert PDF points to image pixels for splitting
+      const pdfToPixelRatio = fullImage.width / chartEl.clientWidth;
+      const drawableWidthPx = (pageWidth - margin * 2) * pdfToPixelRatio;
+      const drawableHeightPx = (pageHeight - margin - yPosition) * pdfToPixelRatio;
+
+      // Split the full image into page-sized tiles with overlap
+      const tiles = await splitImageIntoPages(
+        fullImage,
+        Math.floor(drawableWidthPx),
+        Math.floor(drawableHeightPx),
+        Math.floor(150 * pdfToPixelRatio) // overlap in pixels
+      );
 
       for (let i = 0; i < tiles.length; i++) {
         const tileImg = tiles[i];
