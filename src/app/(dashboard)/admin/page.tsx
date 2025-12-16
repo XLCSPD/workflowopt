@@ -23,6 +23,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Separator } from "@/components/ui/separator";
 import {
   Dialog,
   DialogContent,
@@ -330,9 +331,13 @@ export default function AdminPage() {
         toast({ title: "Success", description: result.message });
         setIsUserDialogOpen(false);
         resetInviteForm();
-        // Reload users
-        const usersData = await getOrganizationUsers();
+        // Reload users + invitations so admins can immediately confirm invite
+        const [usersData, invitationsData] = await Promise.all([
+          getOrganizationUsers(),
+          getPendingInvitations(),
+        ]);
         setUsers(usersData);
+        setPendingInvitations(invitationsData);
       } else {
         toast({
           variant: "destructive",
@@ -1096,7 +1101,11 @@ export default function AdminPage() {
                 <div>
                   <CardTitle>User Management</CardTitle>
                   <CardDescription>
-                    Invite users and manage roles ({users.length} users)
+                    Invite users and manage roles ({users.length} users
+                    {pendingInvitations.length > 0
+                      ? `, ${pendingInvitations.length} pending`
+                      : ""}
+                    )
                   </CardDescription>
                 </div>
                 <Dialog
@@ -1200,6 +1209,71 @@ export default function AdminPage() {
                 </Dialog>
               </CardHeader>
               <CardContent>
+                {pendingInvitations.length > 0 && (
+                  <div className="mb-6">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium">Pending invitations</p>
+                        <p className="text-xs text-muted-foreground">
+                          These invites haven&apos;t been accepted yet.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="mt-3 rounded-lg border bg-muted/20 overflow-hidden">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Email</TableHead>
+                            <TableHead>Role</TableHead>
+                            <TableHead>Status</TableHead>
+                            <TableHead>Sent</TableHead>
+                            <TableHead className="w-[70px]"></TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {pendingInvitations.map((invitation) => (
+                            <TableRow key={invitation.id}>
+                              <TableCell className="font-medium">{invitation.email}</TableCell>
+                              <TableCell>
+                                <Badge variant={getRoleBadgeVariant(invitation.role)}>
+                                  {getRoleDisplayName(invitation.role)}
+                                </Badge>
+                              </TableCell>
+                              <TableCell>
+                                <Badge
+                                  variant={
+                                    invitation.status === "pending"
+                                      ? "secondary"
+                                      : invitation.status === "failed"
+                                        ? "destructive"
+                                        : "outline"
+                                  }
+                                >
+                                  {invitation.status}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="text-muted-foreground">
+                                {new Date(invitation.created_at).toLocaleDateString()}
+                              </TableCell>
+                              <TableCell>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => handleCancelInvitation(invitation.id)}
+                                  title="Cancel invitation"
+                                >
+                                  <XCircle className="h-4 w-4 text-destructive" />
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                    <Separator className="mt-6" />
+                  </div>
+                )}
+
                 {users.length === 0 ? (
                   <div className="text-center py-8 text-muted-foreground">
                     <Users className="h-12 w-12 mx-auto mb-4 opacity-50" />

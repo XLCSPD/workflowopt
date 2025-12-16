@@ -144,7 +144,9 @@ export async function POST(request: NextRequest) {
             org_id: currentUser.org_id,
             invitation_id: invitation?.id,
           },
-          redirectTo: `${process.env.NEXT_PUBLIC_APP_URL || request.nextUrl.origin}/register`,
+          // Supabase invite links create the auth user first; the invited user then needs
+          // to set their name/password in-app. Use a dedicated accept page (not /register).
+          redirectTo: `${process.env.NEXT_PUBLIC_APP_URL || request.nextUrl.origin}/accept-invite`,
         }
       );
 
