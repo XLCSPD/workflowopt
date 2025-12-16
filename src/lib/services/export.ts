@@ -362,6 +362,25 @@ async function captureWorkflowPagedTiles(args: {
   // Overlap ensures connectors that cross page seams appear on both pages.
   const overlapPx = args.overlapPx ?? 240;
 
+  // html-to-image is significantly more reliable than html2canvas for SVG markers
+  // (React Flow arrowheads are SVG markers and often go missing with html2canvas).
+  // Keep html2canvas as a fallback.
+  type HtmlToImageOptions = {
+    backgroundColor?: string;
+    pixelRatio?: number;
+    cacheBust?: boolean;
+    width?: number;
+    height?: number;
+    filter?: (node: HTMLElement) => boolean;
+  };
+
+  let toCanvas: ((node: HTMLElement, options?: HtmlToImageOptions) => Promise<HTMLCanvasElement>) | null = null;
+  try {
+    const mod = await import("html-to-image");
+    toCanvas = mod.toCanvas as unknown as (node: HTMLElement, options?: HtmlToImageOptions) => Promise<HTMLCanvasElement>;
+  } catch {
+    // ignore (fallback to html2canvas)
+  }
   const html2canvas = (await import("html2canvas")).default;
 
   // Quick font readiness (prevents late font swaps clipping)
@@ -433,22 +452,41 @@ async function captureWorkflowPagedTiles(args: {
         // Edges + marker arrowheads can lag behind viewport changes a bit.
         await new Promise((res) => setTimeout(res, 350));
 
+        const filter = (node: HTMLElement) => {
+          const cl = node.classList;
+          if (!cl) return true;
+          return !(
+            cl.contains("react-flow__minimap") ||
+            cl.contains("react-flow__controls") ||
+            cl.contains("react-flow__panel")
+          );
+        };
+
         const canvas = await withTimeout(
-          html2canvas(chartElement, {
-            backgroundColor: "#ffffff",
-            scale: canvasScale,
-            useCORS: true,
-            logging: false,
-            width: chartElement.clientWidth,
-            height: chartElement.clientHeight,
-            allowTaint: true,
-            foreignObjectRendering: false,
-            ignoreElements: (el) =>
-              el.classList?.contains("react-flow__minimap") ||
-              el.classList?.contains("react-flow__controls") ||
-              el.classList?.contains("react-flow__panel"),
-          }),
-          15000,
+          (async () => {
+            if (toCanvas) {
+              return await toCanvas(chartElement, {
+                backgroundColor: "#ffffff",
+                pixelRatio: canvasScale,
+                cacheBust: true,
+                width: chartElement.clientWidth,
+                height: chartElement.clientHeight,
+                filter,
+              });
+            }
+            return await html2canvas(chartElement, {
+              backgroundColor: "#ffffff",
+              scale: canvasScale,
+              useCORS: true,
+              logging: false,
+              width: chartElement.clientWidth,
+              height: chartElement.clientHeight,
+              allowTaint: true,
+              foreignObjectRendering: false,
+              ignoreElements: (el) => !filter(el as unknown as HTMLElement),
+            });
+          })(),
+          20000,
           "Capture tile timed out"
         );
 
