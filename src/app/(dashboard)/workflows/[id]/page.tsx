@@ -988,31 +988,6 @@ export default function WorkflowDetailPage() {
                 />
               </div>
             </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Lead Time (min)</Label>
-                <Input
-                  inputMode="numeric"
-                  placeholder="e.g., 60"
-                  value={stepForm.lead_time_minutes}
-                  onChange={(e) =>
-                    setStepForm({ ...stepForm, lead_time_minutes: e.target.value })
-                  }
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Cycle Time (min)</Label>
-                <Input
-                  inputMode="numeric"
-                  placeholder="e.g., 15"
-                  value={stepForm.cycle_time_minutes}
-                  onChange={(e) =>
-                    setStepForm({ ...stepForm, cycle_time_minutes: e.target.value })
-                  }
-                />
-              </div>
-            </div>
           </div>
           <DialogFooter>
             <Button
@@ -1164,6 +1139,31 @@ export default function WorkflowDetailPage() {
                     </SelectContent>
                   </Select>
                 )}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Lead Time (min)</Label>
+                <Input
+                  inputMode="numeric"
+                  placeholder="e.g., 60"
+                  value={stepForm.lead_time_minutes}
+                  onChange={(e) =>
+                    setStepForm({ ...stepForm, lead_time_minutes: e.target.value })
+                  }
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Cycle Time (min)</Label>
+                <Input
+                  inputMode="numeric"
+                  placeholder="e.g., 15"
+                  value={stepForm.cycle_time_minutes}
+                  onChange={(e) =>
+                    setStepForm({ ...stepForm, cycle_time_minutes: e.target.value })
+                  }
+                />
               </div>
             </div>
           </div>
