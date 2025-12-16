@@ -99,6 +99,8 @@ export default function WorkflowDetailPage() {
     description: "",
     type: "action" as StepType,
     lane: "Requester",
+    lead_time_minutes: "" as string,
+    cycle_time_minutes: "" as string,
   });
   const [isSaving, setIsSaving] = useState(false);
   const [customLanes, setCustomLanes] = useState<string[]>(getDefaultLanes());
@@ -184,6 +186,8 @@ export default function WorkflowDetailPage() {
             description: step.description || "",
             type: step.step_type,
             lane: step.lane,
+            lead_time_minutes: step.lead_time_minutes != null ? String(step.lead_time_minutes) : "",
+            cycle_time_minutes: step.cycle_time_minutes != null ? String(step.cycle_time_minutes) : "",
           });
           setIsEditStepDialogOpen(true);
         }
@@ -212,12 +216,32 @@ export default function WorkflowDetailPage() {
 
     setIsSaving(true);
     try {
+      const leadTime =
+        stepForm.lead_time_minutes.trim() === ""
+          ? null
+          : Number(stepForm.lead_time_minutes);
+      const cycleTime =
+        stepForm.cycle_time_minutes.trim() === ""
+          ? null
+          : Number(stepForm.cycle_time_minutes);
+
+      if ((leadTime != null && !Number.isFinite(leadTime)) || (cycleTime != null && !Number.isFinite(cycleTime))) {
+        toast({
+          variant: "destructive",
+          title: "Invalid time",
+          description: "Lead Time and Cycle Time must be numbers (minutes).",
+        });
+        return;
+      }
+
       const newStep = await createStep({
         process_id: workflow.id,
         name: stepForm.name.trim(),
         description: stepForm.description.trim() || undefined,
         type: stepForm.type,
         lane: stepForm.lane,
+        lead_time_minutes: leadTime,
+        cycle_time_minutes: cycleTime,
         order_index: steps.length,
       });
 
@@ -253,11 +277,31 @@ export default function WorkflowDetailPage() {
 
     setIsSaving(true);
     try {
+      const leadTime =
+        stepForm.lead_time_minutes.trim() === ""
+          ? null
+          : Number(stepForm.lead_time_minutes);
+      const cycleTime =
+        stepForm.cycle_time_minutes.trim() === ""
+          ? null
+          : Number(stepForm.cycle_time_minutes);
+
+      if ((leadTime != null && !Number.isFinite(leadTime)) || (cycleTime != null && !Number.isFinite(cycleTime))) {
+        toast({
+          variant: "destructive",
+          title: "Invalid time",
+          description: "Lead Time and Cycle Time must be numbers (minutes).",
+        });
+        return;
+      }
+
       const updated = await updateStep(editingStep.id, {
         name: stepForm.name.trim(),
         description: stepForm.description.trim() || undefined,
         type: stepForm.type,
         lane: stepForm.lane,
+        lead_time_minutes: leadTime,
+        cycle_time_minutes: cycleTime,
       });
 
       setSteps(steps.map((s) => (s.id === updated.id ? updated : s)));
@@ -563,6 +607,8 @@ export default function WorkflowDetailPage() {
       description: "",
       type: "action",
       lane: customLanes[0] || "Requester",
+      lead_time_minutes: "",
+      cycle_time_minutes: "",
     });
   };
 
@@ -915,6 +961,56 @@ export default function WorkflowDetailPage() {
                     </SelectContent>
                   </Select>
                 )}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Lead Time (min)</Label>
+                <Input
+                  inputMode="numeric"
+                  placeholder="e.g., 60"
+                  value={stepForm.lead_time_minutes}
+                  onChange={(e) =>
+                    setStepForm({ ...stepForm, lead_time_minutes: e.target.value })
+                  }
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Cycle Time (min)</Label>
+                <Input
+                  inputMode="numeric"
+                  placeholder="e.g., 15"
+                  value={stepForm.cycle_time_minutes}
+                  onChange={(e) =>
+                    setStepForm({ ...stepForm, cycle_time_minutes: e.target.value })
+                  }
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Lead Time (min)</Label>
+                <Input
+                  inputMode="numeric"
+                  placeholder="e.g., 60"
+                  value={stepForm.lead_time_minutes}
+                  onChange={(e) =>
+                    setStepForm({ ...stepForm, lead_time_minutes: e.target.value })
+                  }
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Cycle Time (min)</Label>
+                <Input
+                  inputMode="numeric"
+                  placeholder="e.g., 15"
+                  value={stepForm.cycle_time_minutes}
+                  onChange={(e) =>
+                    setStepForm({ ...stepForm, cycle_time_minutes: e.target.value })
+                  }
+                />
               </div>
             </div>
           </div>

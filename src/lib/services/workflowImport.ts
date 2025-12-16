@@ -20,6 +20,8 @@ const importStepSchema = z.object({
   type: stepTypeSchema,
   description: z.string().optional(),
   order: z.number().optional(),
+  lead_time_minutes: z.number().optional(),
+  cycle_time_minutes: z.number().optional(),
 });
 
 // Connection definition for import
@@ -46,6 +48,8 @@ const csvStepRowSchema = z.object({
   type: stepTypeSchema.optional(),
   description: z.string().optional(),
   order: z.coerce.number().optional(),
+  lead_time_minutes: z.coerce.number().optional(),
+  cycle_time_minutes: z.coerce.number().optional(),
 });
 
 // CSV row schema for connections
@@ -260,6 +264,18 @@ export function parseCSV(
     order_index: "order",
     orderindex: "order",
     sequence: "order",
+    lead_time: "lead_time_minutes",
+    lead_time_min: "lead_time_minutes",
+    lead_time_mins: "lead_time_minutes",
+    "lead time": "lead_time_minutes",
+    "lead time (min)": "lead_time_minutes",
+    lead_time_minutes: "lead_time_minutes",
+    cycle_time: "cycle_time_minutes",
+    cycle_time_min: "cycle_time_minutes",
+    cycle_time_mins: "cycle_time_minutes",
+    "cycle time": "cycle_time_minutes",
+    "cycle time (min)": "cycle_time_minutes",
+    cycle_time_minutes: "cycle_time_minutes",
   };
 
   const normalizedHeaders = headers.map((h) => headerMap[h] || h);
@@ -324,6 +340,8 @@ export function parseCSV(
       type: row.type || "action",
       description: row.description,
       order: row.order ? parseInt(row.order, 10) : i,
+      lead_time_minutes: row.lead_time_minutes,
+      cycle_time_minutes: row.cycle_time_minutes,
     });
 
     if (!stepResult.success) {
@@ -543,6 +561,8 @@ export async function importWorkflow(
         description: step.description,
         step_type: step.type,
         lane: step.lane,
+        lead_time_minutes: step.lead_time_minutes ?? null,
+        cycle_time_minutes: step.cycle_time_minutes ?? null,
         order_index: pos.order,
         position_x: pos.x,
         position_y: pos.y,
@@ -624,6 +644,8 @@ export function generateSampleJSON(): string {
         lane: "Requester",
         type: "start",
         description: "Requester submits a purchase request",
+        lead_time_minutes: 60,
+        cycle_time_minutes: 10,
       },
       {
         id: "step-2",
@@ -631,6 +653,8 @@ export function generateSampleJSON(): string {
         lane: "Finance",
         type: "action",
         description: "Finance reviews the request",
+        lead_time_minutes: 240,
+        cycle_time_minutes: 20,
       },
       {
         id: "step-3",
@@ -638,6 +662,8 @@ export function generateSampleJSON(): string {
         lane: "Finance",
         type: "decision",
         description: "Decision point for approval",
+        lead_time_minutes: 60,
+        cycle_time_minutes: 5,
       },
       {
         id: "step-4",
@@ -645,6 +671,8 @@ export function generateSampleJSON(): string {
         lane: "Vendor",
         type: "action",
         description: "Vendor processes the order",
+        lead_time_minutes: 480,
+        cycle_time_minutes: 30,
       },
       {
         id: "step-5",
@@ -652,6 +680,8 @@ export function generateSampleJSON(): string {
         lane: "Requester",
         type: "end",
         description: "Requester receives the goods",
+        lead_time_minutes: 1440,
+        cycle_time_minutes: 15,
       },
     ],
     connections: [
@@ -666,12 +696,12 @@ export function generateSampleJSON(): string {
 }
 
 export function generateSampleCSV(): { steps: string; connections: string } {
-  const stepsCSV = `id,name,lane,type,description,order
-step-1,Submit Request,Requester,start,Requester submits a purchase request,1
-step-2,Review Request,Finance,action,Finance reviews the request,2
-step-3,Approved?,Finance,decision,Decision point for approval,3
-step-4,Process Order,Vendor,action,Vendor processes the order,4
-step-5,Receive Goods,Requester,end,Requester receives the goods,5`;
+  const stepsCSV = `id,name,lane,type,description,order,lead_time_minutes,cycle_time_minutes
+step-1,Submit Request,Requester,start,Requester submits a purchase request,1,60,10
+step-2,Review Request,Finance,action,Finance reviews the request,2,240,20
+step-3,Approved?,Finance,decision,Decision point for approval,3,60,5
+step-4,Process Order,Vendor,action,Vendor processes the order,4,480,30
+step-5,Receive Goods,Requester,end,Requester receives the goods,5,1440,15`;
 
   const connectionsCSV = `from,to,label
 step-1,step-2,

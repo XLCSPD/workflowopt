@@ -13,6 +13,8 @@ export interface CreateStepInput {
   description?: string;
   type: StepType;
   lane: string;
+  lead_time_minutes?: number | null;
+  cycle_time_minutes?: number | null;
   position_x?: number;
   position_y?: number;
   order_index?: number;
@@ -23,6 +25,8 @@ export interface UpdateStepInput {
   description?: string;
   type?: StepType;
   lane?: string;
+  lead_time_minutes?: number | null;
+  cycle_time_minutes?: number | null;
   position_x?: number;
   position_y?: number;
   order_index?: number;
@@ -36,6 +40,8 @@ export async function createStep(input: CreateStepInput): Promise<ProcessStep> {
     description: input.description,
     step_type: input.type,
     lane: input.lane,
+    lead_time_minutes: input.lead_time_minutes ?? null,
+    cycle_time_minutes: input.cycle_time_minutes ?? null,
     position_x: input.position_x,
     position_y: input.position_y,
     order_index: input.order_index,
@@ -61,6 +67,8 @@ export async function updateStep(
   if (updates.description !== undefined) dbUpdates.description = updates.description;
   if (updates.type !== undefined) dbUpdates.step_type = updates.type;
   if (updates.lane !== undefined) dbUpdates.lane = updates.lane;
+  if (updates.lead_time_minutes !== undefined) dbUpdates.lead_time_minutes = updates.lead_time_minutes;
+  if (updates.cycle_time_minutes !== undefined) dbUpdates.cycle_time_minutes = updates.cycle_time_minutes;
   if (updates.position_x !== undefined) dbUpdates.position_x = updates.position_x;
   if (updates.position_y !== undefined) dbUpdates.position_y = updates.position_y;
   if (updates.order_index !== undefined) dbUpdates.order_index = updates.order_index;

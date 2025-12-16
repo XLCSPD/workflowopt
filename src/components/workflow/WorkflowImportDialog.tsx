@@ -535,7 +535,7 @@ export function WorkflowImportDialog({
                   <AlertTitle>Supported CSV Formats</AlertTitle>
                   <AlertDescription className="text-xs mt-2 space-y-2">
                     <p>
-                      <strong>Standard format:</strong> id, name, lane, type, description, order
+                      <strong>Standard format:</strong> id, name, lane, type, description, order, lead_time_minutes, cycle_time_minutes
                     </p>
                     <p>
                       <strong>Premier Health format:</strong> Step, Owner, Action / Process Step,
