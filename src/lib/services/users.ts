@@ -1,5 +1,5 @@
 import { getSupabaseClient } from "@/lib/supabase/client";
-import type { User, UserRole } from "@/types";
+import type { Organization, User, UserRole } from "@/types";
 
 const supabase = getSupabaseClient();
 
@@ -188,6 +188,84 @@ export async function cancelInvitation(invitationId: string): Promise<boolean> {
     console.error("Failed to cancel invitation:", error);
     return false;
   }
+}
+
+// ============================================
+// ADMIN (GLOBAL) USER MANAGEMENT (via API routes)
+// ============================================
+
+export interface AdminUser {
+  id: string;
+  name: string;
+  email: string;
+  role: UserRole;
+  org_id: string | null;
+  org_name: string | null;
+  created_at: string;
+  updated_at: string;
+  banned_until: string | null;
+  last_sign_in_at: string | null;
+}
+
+export interface AdminUsersResponse {
+  users: AdminUser[];
+  page: number;
+  perPage: number;
+  total: number;
+}
+
+export async function getAllUsersAdmin(params?: {
+  q?: string;
+  orgId?: string;
+  page?: number;
+  perPage?: number;
+}): Promise<AdminUsersResponse> {
+  const qs = new URLSearchParams();
+  if (params?.q) qs.set("q", params.q);
+  if (params?.orgId) qs.set("orgId", params.orgId);
+  if (typeof params?.page === "number") qs.set("page", String(params.page));
+  if (typeof params?.perPage === "number") qs.set("perPage", String(params.perPage));
+
+  const res = await fetch(`/api/admin/users?${qs.toString()}`, { method: "GET" });
+  const data = (await res.json().catch(() => ({}))) as Partial<AdminUsersResponse> & {
+    error?: string;
+  };
+
+  if (!res.ok) {
+    throw new Error(data.error || "Failed to fetch users");
+  }
+
+  return {
+    users: data.users || [],
+    page: data.page || 1,
+    perPage: data.perPage || 25,
+    total: data.total ?? (data.users?.length || 0),
+  };
+}
+
+export async function updateUserAdmin(
+  userId: string,
+  updates: Partial<Pick<AdminUser, "name" | "role" | "org_id">> & { disabled?: boolean }
+): Promise<boolean> {
+  const res = await fetch(`/api/admin/users/${encodeURIComponent(userId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(updates),
+  });
+
+  if (!res.ok) {
+    const data = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(data.error || "Failed to update user");
+  }
+
+  return true;
+}
+
+export async function getAllOrganizationsAdmin(): Promise<Organization[]> {
+  const res = await fetch("/api/admin/organizations", { method: "GET" });
+  const data = (await res.json().catch(() => ({}))) as { organizations?: Organization[]; error?: string };
+  if (!res.ok) throw new Error(data.error || "Failed to fetch organizations");
+  return data.organizations || [];
 }
 
 // ============================================

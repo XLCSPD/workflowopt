@@ -60,7 +60,9 @@ import {
   Video,
   FileText,
   Mail,
+  Search,
   Shield,
+  ShieldCheck,
   UserCog,
   UserMinus,
   Building,
@@ -70,6 +72,7 @@ import {
   Workflow,
   ClipboardList,
   Eye,
+  Ban,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -93,6 +96,10 @@ import {
   getRoleDisplayName,
   getPendingInvitations,
   cancelInvitation,
+  getAllUsersAdmin,
+  updateUserAdmin,
+  getAllOrganizationsAdmin,
+  type AdminUser,
   type Invitation,
 } from "@/lib/services/users";
 import {
@@ -136,6 +143,15 @@ export default function AdminPage() {
 
   // Users State
   const [users, setUsers] = useState<User[]>([]);
+  const [userScope, setUserScope] = useState<"org" | "all">("org");
+  const [adminUsers, setAdminUsers] = useState<AdminUser[]>([]);
+  const [adminUsersTotal, setAdminUsersTotal] = useState(0);
+  const [adminUsersPage, setAdminUsersPage] = useState(1);
+  const [adminUsersPerPage] = useState(25);
+  const [adminUsersSearch, setAdminUsersSearch] = useState("");
+  const [isAdminUsersLoading, setIsAdminUsersLoading] = useState(false);
+  const [allOrganizations, setAllOrganizations] = useState<Organization[]>([]);
+
   const [isUserDialogOpen, setIsUserDialogOpen] = useState(false);
   const [isRoleDialogOpen, setIsRoleDialogOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
@@ -145,6 +161,15 @@ export default function AdminPage() {
   });
   const [isInviting, setIsInviting] = useState(false);
   const [pendingInvitations, setPendingInvitations] = useState<Invitation[]>([]);
+
+  const [isAdminEditDialogOpen, setIsAdminEditDialogOpen] = useState(false);
+  const [editingAdminUser, setEditingAdminUser] = useState<AdminUser | null>(null);
+  const [adminEditForm, setAdminEditForm] = useState<{
+    name: string;
+    role: UserRole;
+    org_id: string | null;
+    disabled: boolean;
+  }>({ name: "", role: "participant", org_id: null, disabled: false });
 
   // Organization State
   const [organization, setOrganization] = useState<Organization | null>(null);
@@ -191,6 +216,48 @@ export default function AdminPage() {
     };
     loadData();
   }, [toast]);
+
+  const loadAllUsers = async (opts?: { page?: number; q?: string }) => {
+    if (currentUser?.role !== "admin") return;
+    setIsAdminUsersLoading(true);
+    try {
+      const res = await getAllUsersAdmin({
+        page: opts?.page ?? adminUsersPage,
+        perPage: adminUsersPerPage,
+        q: opts?.q ?? adminUsersSearch,
+      });
+      setAdminUsers(res.users);
+      setAdminUsersTotal(res.total);
+    } catch (error) {
+      console.error("Failed to load all users:", error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to load users.",
+      });
+    } finally {
+      setIsAdminUsersLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const loadOrgs = async () => {
+      if (currentUser?.role !== "admin") return;
+      try {
+        const orgs = await getAllOrganizationsAdmin();
+        setAllOrganizations(orgs);
+      } catch (e) {
+        console.error("Failed to load organizations:", e);
+      }
+    };
+    void loadOrgs();
+  }, [currentUser?.role]);
+
+  useEffect(() => {
+    if (userScope !== "all") return;
+    void loadAllUsers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userScope, adminUsersPage]);
 
   // Waste Type CRUD
   const handleSaveWasteType = async () => {
@@ -338,6 +405,9 @@ export default function AdminPage() {
         ]);
         setUsers(usersData);
         setPendingInvitations(invitationsData);
+        if (userScope === "all") {
+          void loadAllUsers({ page: adminUsersPage });
+        }
       } else {
         toast({
           variant: "destructive",
@@ -354,6 +424,47 @@ export default function AdminPage() {
       });
     } finally {
       setIsInviting(false);
+    }
+  };
+
+  const openAdminEdit = (u: AdminUser) => {
+    const isDisabled = !!(u.banned_until && new Date(u.banned_until).getTime() > Date.now());
+    setEditingAdminUser(u);
+    setAdminEditForm({
+      name: u.name || "",
+      role: u.role,
+      org_id: u.org_id ?? null,
+      disabled: isDisabled,
+    });
+    setIsAdminEditDialogOpen(true);
+  };
+
+  const handleSaveAdminEdit = async () => {
+    if (!editingAdminUser) return;
+    try {
+      await updateUserAdmin(editingAdminUser.id, {
+        name: adminEditForm.name,
+        role: adminEditForm.role,
+        org_id: adminEditForm.org_id,
+        disabled: adminEditForm.disabled,
+      });
+      toast({ title: "User updated" });
+      setIsAdminEditDialogOpen(false);
+      setEditingAdminUser(null);
+
+      if (userScope === "all") {
+        await loadAllUsers();
+      } else {
+        const usersData = await getOrganizationUsers();
+        setUsers(usersData);
+      }
+    } catch (error) {
+      console.error("Failed to update user:", error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to update user.",
+      });
     }
   };
 
@@ -1101,112 +1212,145 @@ export default function AdminPage() {
                 <div>
                   <CardTitle>User Management</CardTitle>
                   <CardDescription>
-                    Invite users and manage roles ({users.length} users
+                    Invite users and manage roles ({userScope === "all" ? adminUsersTotal : users.length} users
                     {pendingInvitations.length > 0
                       ? `, ${pendingInvitations.length} pending`
                       : ""}
                     )
                   </CardDescription>
                 </div>
-                <Dialog
-                  open={isUserDialogOpen}
-                  onOpenChange={(open) => {
-                    setIsUserDialogOpen(open);
-                    if (!open) resetInviteForm();
-                  }}
-                >
-                  <DialogTrigger asChild>
-                    <Button className="bg-brand-gold hover:bg-brand-gold/90 text-brand-navy">
-                      <Plus className="mr-2 h-4 w-4" />
-                      Invite User
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent>
-                    <DialogHeader>
-                      <DialogTitle>Invite User</DialogTitle>
-                      <DialogDescription>
-                        Send an invitation to join your organization
-                      </DialogDescription>
-                    </DialogHeader>
-                    <div className="space-y-4 py-4">
-                      <div className="space-y-2">
-                        <Label>Email Address</Label>
-                        <div className="relative">
-                          <Mail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                          <Input
-                            type="email"
-                            placeholder="user@company.com"
-                            className="pl-10"
-                            value={inviteForm.email}
-                            onChange={(e) =>
-                              setInviteForm({ ...inviteForm, email: e.target.value })
+                <div className="flex items-center gap-2">
+                  {currentUser?.role === "admin" && (
+                    <>
+                      <Button
+                        variant={userScope === "org" ? "default" : "outline"}
+                        onClick={() => setUserScope("org")}
+                        className={
+                          userScope === "org"
+                            ? "bg-brand-navy text-white hover:bg-brand-navy/90"
+                            : "bg-white"
+                        }
+                      >
+                        My Org
+                      </Button>
+                      <Button
+                        variant={userScope === "all" ? "default" : "outline"}
+                        onClick={() => {
+                          setUserScope("all");
+                          setAdminUsersPage(1);
+                          void loadAllUsers({ page: 1 });
+                        }}
+                        className={
+                          userScope === "all"
+                            ? "bg-brand-navy text-white hover:bg-brand-navy/90"
+                            : "bg-white"
+                        }
+                      >
+                        All Users
+                      </Button>
+                    </>
+                  )}
+
+                  <Dialog
+                    open={isUserDialogOpen}
+                    onOpenChange={(open) => {
+                      setIsUserDialogOpen(open);
+                      if (!open) resetInviteForm();
+                    }}
+                  >
+                    <DialogTrigger asChild>
+                      <Button className="bg-brand-gold hover:bg-brand-gold/90 text-brand-navy">
+                        <Plus className="mr-2 h-4 w-4" />
+                        Invite User
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent>
+                      <DialogHeader>
+                        <DialogTitle>Invite User</DialogTitle>
+                        <DialogDescription>
+                          Send an invitation to join your organization
+                        </DialogDescription>
+                      </DialogHeader>
+                      <div className="space-y-4 py-4">
+                        <div className="space-y-2">
+                          <Label>Email Address</Label>
+                          <div className="relative">
+                            <Mail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                            <Input
+                              type="email"
+                              placeholder="user@company.com"
+                              className="pl-10"
+                              value={inviteForm.email}
+                              onChange={(e) =>
+                                setInviteForm({ ...inviteForm, email: e.target.value })
+                              }
+                            />
+                          </div>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Role</Label>
+                          <Select
+                            value={inviteForm.role}
+                            onValueChange={(value: UserRole) =>
+                              setInviteForm({ ...inviteForm, role: value })
                             }
-                          />
+                          >
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="participant">
+                                <div className="flex items-center gap-2">
+                                  <Users className="h-4 w-4" />
+                                  Participant
+                                </div>
+                              </SelectItem>
+                              <SelectItem value="facilitator">
+                                <div className="flex items-center gap-2">
+                                  <UserCog className="h-4 w-4" />
+                                  Facilitator
+                                </div>
+                              </SelectItem>
+                              <SelectItem value="admin">
+                                <div className="flex items-center gap-2">
+                                  <Shield className="h-4 w-4" />
+                                  Admin
+                                </div>
+                              </SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            {inviteForm.role === "admin" && "Full access to all features and settings"}
+                            {inviteForm.role === "facilitator" && "Can create and manage sessions and workflows"}
+                            {inviteForm.role === "participant" && "Can participate in sessions and view training"}
+                          </p>
                         </div>
                       </div>
-                      <div className="space-y-2">
-                        <Label>Role</Label>
-                        <Select
-                          value={inviteForm.role}
-                          onValueChange={(value: UserRole) =>
-                            setInviteForm({ ...inviteForm, role: value })
-                          }
+                      <DialogFooter>
+                        <Button
+                          variant="outline"
+                          onClick={() => setIsUserDialogOpen(false)}
                         >
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="participant">
-                              <div className="flex items-center gap-2">
-                                <Users className="h-4 w-4" />
-                                Participant
-                              </div>
-                            </SelectItem>
-                            <SelectItem value="facilitator">
-                              <div className="flex items-center gap-2">
-                                <UserCog className="h-4 w-4" />
-                                Facilitator
-                              </div>
-                            </SelectItem>
-                            <SelectItem value="admin">
-                              <div className="flex items-center gap-2">
-                                <Shield className="h-4 w-4" />
-                                Admin
-                              </div>
-                            </SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          {inviteForm.role === "admin" && "Full access to all features and settings"}
-                          {inviteForm.role === "facilitator" && "Can create and manage sessions and workflows"}
-                          {inviteForm.role === "participant" && "Can participate in sessions and view training"}
-                        </p>
-                      </div>
-                    </div>
-                    <DialogFooter>
-                      <Button
-                        variant="outline"
-                        onClick={() => setIsUserDialogOpen(false)}
-                      >
-                        Cancel
-                      </Button>
-                      <Button
-                        onClick={handleInviteUser}
-                        disabled={isInviting}
-                        className="bg-brand-gold hover:bg-brand-gold/90 text-brand-navy"
-                      >
-                        {isInviting ? (
-                          <>
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            Inviting...
-                          </>
-                        ) : (
-                          "Send Invitation"
-                        )}
-                      </Button>
-                    </DialogFooter>
-                  </DialogContent>
-                </Dialog>
+                          Cancel
+                        </Button>
+                        <Button
+                          onClick={handleInviteUser}
+                          disabled={isInviting}
+                          className="bg-brand-gold hover:bg-brand-gold/90 text-brand-navy"
+                        >
+                          {isInviting ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              Inviting...
+                            </>
+                          ) : (
+                            "Send Invitation"
+                          )}
+                        </Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
+                </div>
               </CardHeader>
               <CardContent>
                 {pendingInvitations.length > 0 && (
@@ -1274,88 +1418,219 @@ export default function AdminPage() {
                   </div>
                 )}
 
-                {users.length === 0 ? (
-                  <div className="text-center py-8 text-muted-foreground">
-                    <Users className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                    <p>No users found.</p>
-                    <p className="text-sm">
-                      Invite users to get started.
-                    </p>
+                {userScope === "all" && (
+                  <div className="mb-4 flex flex-col md:flex-row md:items-center gap-3">
+                    <div className="relative max-w-md w-full">
+                      <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        value={adminUsersSearch}
+                        onChange={(e) => setAdminUsersSearch(e.target.value)}
+                        placeholder="Search all users (name or email)..."
+                        className="pl-10"
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            setAdminUsersPage(1);
+                            void loadAllUsers({ page: 1, q: adminUsersSearch });
+                          }
+                        }}
+                      />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        className="bg-white"
+                        onClick={() => {
+                          setAdminUsersPage(1);
+                          void loadAllUsers({ page: 1, q: adminUsersSearch });
+                        }}
+                        disabled={isAdminUsersLoading}
+                      >
+                        Search
+                      </Button>
+                      <Button
+                        variant="outline"
+                        className="bg-white"
+                        onClick={() => setAdminUsersPage((p) => Math.max(1, p - 1))}
+                        disabled={isAdminUsersLoading || adminUsersPage <= 1}
+                      >
+                        Prev
+                      </Button>
+                      <Button
+                        variant="outline"
+                        className="bg-white"
+                        onClick={() => setAdminUsersPage((p) => p + 1)}
+                        disabled={isAdminUsersLoading || adminUsers.length < adminUsersPerPage}
+                      >
+                        Next
+                      </Button>
+                      <span className="text-xs text-muted-foreground ml-2">
+                        Page {adminUsersPage}
+                      </span>
+                    </div>
                   </div>
-                ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>User</TableHead>
-                        <TableHead>Email</TableHead>
-                        <TableHead>Role</TableHead>
-                        <TableHead>Joined</TableHead>
-                        <TableHead className="w-[70px]"></TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {users.map((user) => (
-                        <TableRow key={user.id}>
-                          <TableCell>
-                            <div className="flex items-center gap-3">
-                              <Avatar className="h-8 w-8">
-                                <AvatarImage src={user.avatar_url || undefined} />
-                                <AvatarFallback className="bg-brand-gold/20 text-brand-navy text-xs">
-                                  {getUserInitials(user.name)}
-                                </AvatarFallback>
-                              </Avatar>
-                              <div>
-                                <p className="font-medium">{user.name}</p>
-                                {user.id === currentUser?.id && (
-                                  <span className="text-xs text-muted-foreground">(You)</span>
-                                )}
-                              </div>
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-muted-foreground">
-                            {user.email}
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant={getRoleBadgeVariant(user.role)}>
-                              {getRoleDisplayName(user.role)}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="text-muted-foreground">
-                            {new Date(user.created_at).toLocaleDateString()}
-                          </TableCell>
-                          <TableCell>
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="icon">
-                                  <MoreVertical className="h-4 w-4" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end">
-                                <DropdownMenuItem
-                                  onClick={() => {
-                                    setEditingUser(user);
-                                    setIsRoleDialogOpen(true);
-                                  }}
-                                >
-                                  <UserCog className="mr-2 h-4 w-4" />
-                                  Change Role
-                                </DropdownMenuItem>
-                                <DropdownMenuSeparator />
-                                <DropdownMenuItem
-                                  className="text-destructive"
-                                  onClick={() => handleRemoveUser(user.id)}
-                                  disabled={user.id === currentUser?.id}
-                                >
-                                  <UserMinus className="mr-2 h-4 w-4" />
-                                  Remove from Org
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                          </TableCell>
+                )}
+
+                {userScope === "org" ? (
+                  users.length === 0 ? (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <Users className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                      <p>No users found.</p>
+                      <p className="text-sm">Invite users to get started.</p>
+                    </div>
+                  ) : (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>User</TableHead>
+                          <TableHead>Email</TableHead>
+                          <TableHead>Role</TableHead>
+                          <TableHead>Joined</TableHead>
+                          <TableHead className="w-[70px]"></TableHead>
                         </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                      </TableHeader>
+                      <TableBody>
+                        {users.map((user) => (
+                          <TableRow key={user.id}>
+                            <TableCell>
+                              <div className="flex items-center gap-3">
+                                <Avatar className="h-8 w-8">
+                                  <AvatarImage src={user.avatar_url || undefined} />
+                                  <AvatarFallback className="bg-brand-gold/20 text-brand-navy text-xs">
+                                    {getUserInitials(user.name)}
+                                  </AvatarFallback>
+                                </Avatar>
+                                <div>
+                                  <p className="font-medium">{user.name}</p>
+                                  {user.id === currentUser?.id && (
+                                    <span className="text-xs text-muted-foreground">(You)</span>
+                                  )}
+                                </div>
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-muted-foreground">{user.email}</TableCell>
+                            <TableCell>
+                              <Badge variant={getRoleBadgeVariant(user.role)}>
+                                {getRoleDisplayName(user.role)}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-muted-foreground">
+                              {new Date(user.created_at).toLocaleDateString()}
+                            </TableCell>
+                            <TableCell>
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button variant="ghost" size="icon">
+                                    <MoreVertical className="h-4 w-4" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                  <DropdownMenuItem
+                                    onClick={() => {
+                                      setEditingUser(user);
+                                      setIsRoleDialogOpen(true);
+                                    }}
+                                  >
+                                    <UserCog className="mr-2 h-4 w-4" />
+                                    Change Role
+                                  </DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem
+                                    className="text-destructive"
+                                    onClick={() => handleRemoveUser(user.id)}
+                                    disabled={user.id === currentUser?.id}
+                                  >
+                                    <UserMinus className="mr-2 h-4 w-4" />
+                                    Remove from Org
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  )
+                ) : (
+                  <div className="rounded-lg border bg-white overflow-hidden">
+                    {isAdminUsersLoading ? (
+                      <div className="flex items-center justify-center py-10">
+                        <Loader2 className="h-6 w-6 animate-spin text-brand-gold" />
+                      </div>
+                    ) : adminUsers.length === 0 ? (
+                      <div className="text-center py-10 text-muted-foreground">
+                        <Users className="h-10 w-10 mx-auto mb-3 opacity-50" />
+                        <p>No users found.</p>
+                      </div>
+                    ) : (
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>User</TableHead>
+                            <TableHead>Email</TableHead>
+                            <TableHead>Org</TableHead>
+                            <TableHead>Role</TableHead>
+                            <TableHead>Status</TableHead>
+                            <TableHead>Last sign-in</TableHead>
+                            <TableHead className="w-[70px]"></TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {adminUsers.map((u) => {
+                            const disabled = !!(
+                              u.banned_until && new Date(u.banned_until).getTime() > Date.now()
+                            );
+                            return (
+                              <TableRow key={u.id}>
+                                <TableCell className="font-medium">{u.name || "—"}</TableCell>
+                                <TableCell className="text-muted-foreground">{u.email}</TableCell>
+                                <TableCell className="text-muted-foreground">
+                                  {u.org_name || "Unassigned"}
+                                </TableCell>
+                                <TableCell>
+                                  <Badge variant={getRoleBadgeVariant(u.role)}>
+                                    {getRoleDisplayName(u.role)}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell>
+                                  <Badge variant={disabled ? "destructive" : "outline"}>
+                                    {disabled ? (
+                                      <span className="inline-flex items-center gap-1">
+                                        <Ban className="h-3.5 w-3.5" />
+                                        Disabled
+                                      </span>
+                                    ) : (
+                                      <span className="inline-flex items-center gap-1">
+                                        <ShieldCheck className="h-3.5 w-3.5" />
+                                        Active
+                                      </span>
+                                    )}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell className="text-muted-foreground">
+                                  {u.last_sign_in_at ? new Date(u.last_sign_in_at).toLocaleString() : "—"}
+                                </TableCell>
+                                <TableCell>
+                                  <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                      <Button variant="ghost" size="icon">
+                                        <MoreVertical className="h-4 w-4" />
+                                      </Button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end">
+                                      <DropdownMenuItem onClick={() => openAdminEdit(u)}>
+                                        <Edit className="mr-2 h-4 w-4" />
+                                        Edit
+                                      </DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                  </DropdownMenu>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    )}
+                  </div>
                 )}
               </CardContent>
             </Card>
@@ -1418,6 +1693,133 @@ export default function AdminPage() {
               }}
             >
               Cancel
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Global Admin Edit User Dialog */}
+      <Dialog
+        open={isAdminEditDialogOpen}
+        onOpenChange={(open) => {
+          setIsAdminEditDialogOpen(open);
+          if (!open) setEditingAdminUser(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit User</DialogTitle>
+            <DialogDescription>
+              Update user profile, organization, role, and access.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label>Name</Label>
+              <Input
+                value={adminEditForm.name}
+                onChange={(e) => setAdminEditForm({ ...adminEditForm, name: e.target.value })}
+                placeholder="Full name"
+              />
+              <p className="text-xs text-muted-foreground">
+                Email: {editingAdminUser?.email || "—"}
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Role</Label>
+              <Select
+                value={adminEditForm.role}
+                onValueChange={(value: UserRole) =>
+                  setAdminEditForm({ ...adminEditForm, role: value })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="participant">
+                    <div className="flex items-center gap-2">
+                      <Users className="h-4 w-4" />
+                      Participant
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="facilitator">
+                    <div className="flex items-center gap-2">
+                      <UserCog className="h-4 w-4" />
+                      Facilitator
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="admin">
+                    <div className="flex items-center gap-2">
+                      <Shield className="h-4 w-4" />
+                      Admin
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Organization</Label>
+              <Select
+                value={adminEditForm.org_id ?? "unassigned"}
+                onValueChange={(value: string) =>
+                  setAdminEditForm({
+                    ...adminEditForm,
+                    org_id: value === "unassigned" ? null : value,
+                  })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="unassigned">
+                    <div className="flex items-center gap-2">
+                      <Building className="h-4 w-4" />
+                      Unassigned
+                    </div>
+                  </SelectItem>
+                  {allOrganizations.map((org) => (
+                    <SelectItem key={org.id} value={org.id}>
+                      {org.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex items-center justify-between rounded-lg border p-3">
+              <div>
+                <p className="text-sm font-medium">Account access</p>
+                <p className="text-xs text-muted-foreground">
+                  {adminEditForm.disabled ? "User is disabled (banned)." : "User can sign in."}
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant={adminEditForm.disabled ? "outline" : "destructive"}
+                onClick={() =>
+                  setAdminEditForm({ ...adminEditForm, disabled: !adminEditForm.disabled })
+                }
+              >
+                {adminEditForm.disabled ? "Enable" : "Disable"}
+              </Button>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsAdminEditDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              className="bg-brand-gold hover:bg-brand-gold/90 text-brand-navy"
+              onClick={handleSaveAdminEdit}
+            >
+              <Save className="mr-2 h-4 w-4" />
+              Save Changes
             </Button>
           </DialogFooter>
         </DialogContent>

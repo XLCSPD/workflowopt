@@ -7,6 +7,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Loader2, ArrowLeft, CheckCircle, AlertCircle, Mail } from "lucide-react";
+import type { AuthChangeEvent, Session } from "@supabase/supabase-js";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { VersatexLogo } from "@/components/branding/VersatexLogo";
@@ -89,7 +90,8 @@ export default function AcceptInvitePage() {
       }
 
       // Listen for auth state changes triggered by Supabase invite link
-      const { data: authListener } = supabase.auth.onAuthStateChange((_event, newSession) => {
+      const { data: authListener } = supabase.auth.onAuthStateChange(
+        (_event: AuthChangeEvent, newSession: Session | null) => {
         if (!mounted) return;
         if (newSession?.user?.email) {
           setIsValidSession(true);
@@ -102,7 +104,8 @@ export default function AcceptInvitePage() {
           if (metaName) form.setValue("name", metaName);
           setIsChecking(false);
         }
-      });
+        }
+      );
 
       // Give it a moment to process the invite token
       window.setTimeout(() => {
@@ -164,7 +167,7 @@ export default function AcceptInvitePage() {
       setIsSuccess(true);
       toast({
         title: "Welcome!",
-        description: "Your account is ready. Redirecting to the app…",
+        description: "Your account is ready. Redirecting to the app...",
       });
 
       window.setTimeout(() => {
@@ -189,7 +192,7 @@ export default function AcceptInvitePage() {
         <Card className="w-full max-w-md relative z-10 shadow-xl border-0 bg-white/80 backdrop-blur-sm">
           <CardContent className="pt-8 pb-8 flex flex-col items-center">
             <Loader2 className="h-8 w-8 animate-spin text-brand-gold mb-4" />
-            <p className="text-brand-charcoal">Verifying invite link…</p>
+            <p className="text-brand-charcoal">Verifying invite link...</p>
           </CardContent>
         </Card>
       </div>
@@ -254,7 +257,7 @@ export default function AcceptInvitePage() {
                 Setup Complete
               </CardTitle>
               <CardDescription className="text-brand-charcoal mt-2">
-                You’re all set. Redirecting you to {appName}…
+                You&apos;re all set. Redirecting you to {appName}...
               </CardDescription>
             </div>
           </CardHeader>
@@ -319,7 +322,7 @@ export default function AcceptInvitePage() {
                   <FormItem>
                     <FormLabel>Create Password</FormLabel>
                     <FormControl>
-                      <Input type="password" placeholder="••••••••" className="h-11" {...field} />
+                      <Input type="password" placeholder="********" className="h-11" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -333,7 +336,7 @@ export default function AcceptInvitePage() {
                   <FormItem>
                     <FormLabel>Confirm Password</FormLabel>
                     <FormControl>
-                      <Input type="password" placeholder="••••••••" className="h-11" {...field} />
+                      <Input type="password" placeholder="********" className="h-11" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -348,7 +351,7 @@ export default function AcceptInvitePage() {
                 {isSubmitting ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Completing setup…
+                    Completing setup...
                   </>
                 ) : (
                   "Complete Setup"
