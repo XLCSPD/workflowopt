@@ -280,21 +280,6 @@ function safePdfFilename(value: string): string {
   return base.endsWith(".pdf") ? base : `${base}.pdf`;
 }
 
-async function getImageAspectRatio(dataUrl: string): Promise<number | null> {
-  // Returns height / width
-  try {
-    // eslint-disable-next-line no-restricted-globals
-    const img = new Image();
-    img.decoding = "async";
-    img.src = dataUrl;
-    await img.decode();
-    if (!img.naturalWidth || !img.naturalHeight) return null;
-    return img.naturalHeight / img.naturalWidth;
-  } catch {
-    return null;
-  }
-}
-
 function getReactFlowBounds(nodes: ReactFlowNode[]): { minX: number; minY: number; maxX: number; maxY: number } {
   // Uses node width/height when available; falls back to reasonable defaults.
   const fallbackW = 200;
@@ -328,36 +313,72 @@ async function nextAnimationFrame(): Promise<void> {
 }
 
 /**
- * Captures the entire workflow as a single large image using fitView.
- * This ensures swimlane backgrounds and edges are properly synchronized
- * because fitView triggers React's state update cycle.
+ * Wraps a promise with a timeout.
  */
-async function captureWorkflowFullImage(args: {
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorMsg: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(errorMsg)), timeoutMs)
+    ),
+  ]);
+}
+
+function canvasHasInk(canvas: HTMLCanvasElement): boolean {
+  // Fast “blank page” detection by sampling pixels.
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return true;
+
+  const w = canvas.width;
+  const h = canvas.height;
+  if (w <= 0 || h <= 0) return false;
+
+  // Sample a grid of pixels; if any pixel is not near-white, consider it non-blank.
+  const stepX = Math.max(1, Math.floor(w / 40));
+  const stepY = Math.max(1, Math.floor(h / 40));
+  for (let y = 0; y < h; y += stepY) {
+    for (let x = 0; x < w; x += stepX) {
+      const d = ctx.getImageData(x, y, 1, 1).data;
+      // Treat as “ink” if any channel is noticeably below white
+      if (d[0] < 245 || d[1] < 245 || d[2] < 245) return true;
+    }
+  }
+  return false;
+}
+
+async function captureWorkflowPagedTiles(args: {
   chartElement: HTMLElement;
   reactFlowInstance: ReactFlowInstance;
+  zoom?: number;
   canvasScale?: number;
-}): Promise<{ dataUrl: string; width: number; height: number }> {
+  padding?: number;
+  overlapPx?: number;
+}): Promise<string[]> {
   const { chartElement, reactFlowInstance } = args;
+  const zoom = args.zoom ?? 1;
   const canvasScale = args.canvasScale ?? 2;
+  // Edges/arrowheads often extend beyond node bounds; give extra margin.
+  const padding = args.padding ?? 200;
+  // Overlap ensures connectors that cross page seams appear on both pages.
+  const overlapPx = args.overlapPx ?? 240;
 
   const html2canvas = (await import("html2canvas")).default;
 
-  // Ensure fonts are loaded
+  // Quick font readiness (prevents late font swaps clipping)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fonts = (document as any).fonts as { ready?: Promise<unknown> } | undefined;
   if (fonts?.ready) {
     try {
-      await fonts.ready;
+      await Promise.race([fonts.ready, new Promise((r) => setTimeout(r, 800))]);
     } catch {
       // ignore
     }
   }
 
-  // Add export class for CSS overrides (removes line-clamp, etc.)
   document.documentElement.classList.add("workflow-exporting");
 
-  // Hide interactive overlays during capture
-  const hideSelectors = [".react-flow__panel", ".react-flow__minimap"];
+  // Hide overlays
+  const hideSelectors = [".react-flow__panel", ".react-flow__minimap", ".react-flow__controls"];
   const hidden: Array<{ el: HTMLElement; visibility: string }> = [];
   for (const sel of hideSelectors) {
     chartElement.querySelectorAll<HTMLElement>(sel).forEach((el) => {
@@ -369,113 +390,81 @@ async function captureWorkflowFullImage(args: {
   const originalViewport = reactFlowInstance.getViewport();
 
   try {
-    // Use fitView to show entire workflow - this properly syncs swimlane backgrounds
-    // because it triggers React's state update cycle via useViewport hook
-    reactFlowInstance.fitView({ padding: 0.1, duration: 0 });
-
-    // Wait for React to fully re-render with new viewport
-    await nextAnimationFrame();
-    await nextAnimationFrame();
-    await new Promise((r) => setTimeout(r, 350));
-
-    const canvas = await html2canvas(chartElement, {
-      backgroundColor: "#ffffff",
-      scale: canvasScale,
-      useCORS: true,
-      width: chartElement.clientWidth,
-      height: chartElement.clientHeight,
-    });
-
-    return {
-      dataUrl: canvas.toDataURL("image/png"),
-      width: canvas.width,
-      height: canvas.height,
+    const nodes = reactFlowInstance.getNodes();
+    const bounds = getReactFlowBounds(nodes as unknown as ReactFlowNode[]);
+    const padded = {
+      minX: bounds.minX - padding,
+      minY: bounds.minY - padding,
+      maxX: bounds.maxX + padding,
+      maxY: bounds.maxY + padding,
     };
-  } finally {
-    // Restore viewport and overlays
-    reactFlowInstance.setViewport(originalViewport, { duration: 0 });
-    for (const h of hidden) {
-      h.el.style.visibility = h.visibility;
+
+    const flowEl = chartElement.querySelector<HTMLElement>(".react-flow") ?? chartElement;
+    const viewportPxW = Math.max(1, flowEl.clientWidth);
+    const viewportPxH = Math.max(1, flowEl.clientHeight);
+    const tileWorldW = viewportPxW / zoom;
+    const tileWorldH = viewportPxH / zoom;
+    const overlapWorld = overlapPx / zoom;
+
+    const totalW = Math.max(0, padded.maxX - padded.minX);
+    const totalH = Math.max(0, padded.maxY - padded.minY);
+
+    const stepW = Math.max(1, tileWorldW - overlapWorld);
+    const stepH = Math.max(1, tileWorldH - overlapWorld);
+
+    const cols = Math.max(1, Math.ceil(Math.max(0, totalW - overlapWorld) / stepW));
+    const rows = Math.max(1, Math.ceil(Math.max(0, totalH - overlapWorld) / stepH));
+
+    const images: string[] = [];
+
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const originX = Math.min(padded.minX + c * stepW, padded.maxX - tileWorldW);
+        const originY = Math.min(padded.minY + r * stepH, padded.maxY - tileWorldH);
+
+        reactFlowInstance.setViewport(
+          { x: -originX * zoom, y: -originY * zoom, zoom },
+          { duration: 0 }
+        );
+
+        // Let ReactFlow + our swimlane overlay (useViewport) fully sync
+        await nextAnimationFrame();
+        await nextAnimationFrame();
+        // Edges + marker arrowheads can lag behind viewport changes a bit.
+        await new Promise((res) => setTimeout(res, 350));
+
+        const canvas = await withTimeout(
+          html2canvas(chartElement, {
+            backgroundColor: "#ffffff",
+            scale: canvasScale,
+            useCORS: true,
+            logging: false,
+            width: chartElement.clientWidth,
+            height: chartElement.clientHeight,
+            allowTaint: true,
+            foreignObjectRendering: false,
+            ignoreElements: (el) =>
+              el.classList?.contains("react-flow__minimap") ||
+              el.classList?.contains("react-flow__controls") ||
+              el.classList?.contains("react-flow__panel"),
+          }),
+          15000,
+          "Capture tile timed out"
+        );
+
+        // Skip truly blank tiles (helps avoid “blank pages”)
+        if (!canvasHasInk(canvas)) continue;
+
+        images.push(canvas.toDataURL("image/png"));
+      }
     }
+
+    return images;
+  } finally {
+    reactFlowInstance.setViewport(originalViewport, { duration: 0 });
+    for (const h of hidden) h.el.style.visibility = h.visibility;
     document.documentElement.classList.remove("workflow-exporting");
   }
-}
-
-/**
- * Splits a large image into page-sized tiles for PDF export.
- * Uses overlap to prevent content from being cut at page boundaries.
- * Pages are generated left-to-right, then top-to-bottom (reading order).
- */
-function splitImageIntoPages(
-  fullImage: { dataUrl: string; width: number; height: number },
-  pageWidth: number,
-  pageHeight: number,
-  overlapPx: number = 150
-): Promise<string[]> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => {
-      const pages: string[] = [];
-
-      // If the image fits in a single page, just return it
-      if (fullImage.width <= pageWidth && fullImage.height <= pageHeight) {
-        pages.push(fullImage.dataUrl);
-        resolve(pages);
-        return;
-      }
-
-      // Calculate step size (how much we advance per page, accounting for overlap)
-      const stepX = Math.max(1, pageWidth - overlapPx);
-      const stepY = Math.max(1, pageHeight - overlapPx);
-
-      // Calculate number of pages needed
-      const cols = fullImage.width <= pageWidth ? 1 : Math.max(1, Math.ceil((fullImage.width - overlapPx) / stepX));
-      const rows = fullImage.height <= pageHeight ? 1 : Math.max(1, Math.ceil((fullImage.height - overlapPx) / stepY));
-
-      for (let row = 0; row < rows; row++) {
-        for (let col = 0; col < cols; col++) {
-          // Calculate source position, clamping to ensure we capture the end
-          const srcX = Math.min(col * stepX, Math.max(0, fullImage.width - pageWidth));
-          const srcY = Math.min(row * stepY, Math.max(0, fullImage.height - pageHeight));
-
-          // Calculate actual dimensions to capture (may be smaller at edges)
-          const captureW = Math.min(pageWidth, fullImage.width - srcX);
-          const captureH = Math.min(pageHeight, fullImage.height - srcY);
-
-          // Create canvas for this page
-          const pageCanvas = document.createElement("canvas");
-          pageCanvas.width = captureW;
-          pageCanvas.height = captureH;
-          const ctx = pageCanvas.getContext("2d");
-
-          if (ctx) {
-            // Fill with white background
-            ctx.fillStyle = "#ffffff";
-            ctx.fillRect(0, 0, captureW, captureH);
-
-            // Draw the portion of the full image
-            ctx.drawImage(
-              img,
-              srcX,
-              srcY,
-              captureW,
-              captureH,
-              0,
-              0,
-              captureW,
-              captureH
-            );
-
-            pages.push(pageCanvas.toDataURL("image/png"));
-          }
-        }
-      }
-
-      resolve(pages);
-    };
-    img.onerror = reject;
-    img.src = fullImage.dataUrl;
-  });
 }
 
 export async function exportWorkflowToPDF(args: {
@@ -519,78 +508,52 @@ export async function exportWorkflowToPDF(args: {
   doc.text(`Generated: ${new Date().toLocaleString()}`, 20, yPosition);
   yPosition += 10;
 
-  // Optional: process map snapshot
-  if (chartElementId) {
+  // Workflow diagram (end-to-end, paged, legible)
+  if (chartElementId && reactFlowInstance) {
     const chartEl = document.getElementById(chartElementId);
-    if (chartEl && reactFlowInstance) {
-      // Capture the full workflow as a single large image
-      const fullImage = await captureWorkflowFullImage({
-        chartElement: chartEl,
-        reactFlowInstance,
-        canvasScale: 2,
-      });
+    if (chartEl && chartEl.clientWidth > 0 && chartEl.clientHeight > 0) {
+      try {
+        const tiles = await captureWorkflowPagedTiles({
+          chartElement: chartEl,
+          reactFlowInstance,
+          zoom: 1, // Keep nodes readable; we page horizontally/vertically as needed
+          canvasScale: 2,
+          padding: 220,
+          overlapPx: 260,
+        });
 
-      const pageWidth = doc.internal.pageSize.getWidth();
-      const pageHeight = doc.internal.pageSize.getHeight();
-      const margin = 15;
-
-      // Calculate the drawable area in pixels (at scale 2)
-      // We need to convert PDF points to image pixels for splitting
-      const pdfToPixelRatio = fullImage.width / chartEl.clientWidth;
-      const drawableWidthPx = (pageWidth - margin * 2) * pdfToPixelRatio;
-      const drawableHeightPx = (pageHeight - margin - yPosition) * pdfToPixelRatio;
-
-      // Split the full image into page-sized tiles with overlap
-      const tiles = await splitImageIntoPages(
-        fullImage,
-        Math.floor(drawableWidthPx),
-        Math.floor(drawableHeightPx),
-        Math.floor(150 * pdfToPixelRatio) // overlap in pixels
-      );
-
-      for (let i = 0; i < tiles.length; i++) {
-        const tileImg = tiles[i];
-        const yStart = i === 0 ? yPosition : margin;
-        const maxW = pageWidth - margin * 2;
-        const maxH = pageHeight - yStart - margin;
-
-        const aspect = (await getImageAspectRatio(tileImg)) ?? 9 / 16;
-        let drawW = maxW;
-        let drawH = drawW * aspect;
-        if (drawH > maxH) {
-          drawH = maxH;
-          drawW = drawH / aspect;
-        }
-
-        doc.setDrawColor(230, 230, 230);
-        doc.rect(margin, yStart, drawW, drawH);
-        doc.addImage(tileImg, "PNG", margin, yStart, drawW, drawH);
-
-        if (i < tiles.length - 1) {
-          doc.addPage("a4", "landscape");
-        }
-      }
-
-      // Start tables on a fresh page after the full workflow image.
-      doc.addPage("a4", "landscape");
-      yPosition = 20;
-    } else {
-      // Fallback: single-page snapshot (fits current viewport)
-      const img = await captureChartAsImage(chartElementId);
-      if (img) {
+        // Draw tiles. Each tile is exactly the on-screen viewport, so we scale to page once.
         const pageWidth = doc.internal.pageSize.getWidth();
         const pageHeight = doc.internal.pageSize.getHeight();
         const margin = 15;
         const maxW = pageWidth - margin * 2;
-        const maxH = pageHeight - yPosition - 20;
+        const maxHFirst = pageHeight - yPosition - margin;
+        const aspect = chartEl.clientHeight / chartEl.clientWidth;
 
-        const aspect = (await getImageAspectRatio(img)) ?? 9 / 16;
-        const h = Math.min(maxH, maxW * aspect);
+        for (let i = 0; i < tiles.length; i++) {
+          const img = tiles[i];
+          const yStart = i === 0 ? yPosition : margin;
+          const maxH = i === 0 ? maxHFirst : pageHeight - yStart - margin;
 
-        doc.setDrawColor(230, 230, 230);
-        doc.rect(margin, yPosition, maxW, h);
-        doc.addImage(img, "PNG", margin, yPosition, maxW, h);
-        yPosition += h + 12;
+          let drawW = maxW;
+          let drawH = drawW * aspect;
+          if (drawH > maxH) {
+            drawH = maxH;
+            drawW = drawH / aspect;
+          }
+          const xStart = margin + (maxW - drawW) / 2;
+
+          doc.addImage(img, "PNG", xStart, yStart, drawW, drawH);
+
+          if (i < tiles.length - 1) doc.addPage("a4", "landscape");
+        }
+
+        // Tables on a fresh page after the diagram tiles.
+        doc.addPage("a4", "landscape");
+        yPosition = 20;
+      } catch (e) {
+        console.error("Workflow diagram capture failed:", e);
+        // Continue without diagram (tables still export)
       }
     }
   }
