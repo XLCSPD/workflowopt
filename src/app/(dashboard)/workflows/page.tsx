@@ -42,6 +42,9 @@ import {
   ArrowRight,
   Loader2,
   Upload,
+  LayoutGrid,
+  List,
+  ArrowUpDown,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -51,11 +54,33 @@ import {
 } from "@/lib/services/workflows";
 import { WorkflowImportDialog } from "@/components/workflow/WorkflowImportDialog";
 import type { Process } from "@/types";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 interface WorkflowWithStats extends Process {
   stepCount: number;
   laneCount: number;
   sessionCount: number;
+}
+
+type ViewMode = "grid" | "list";
+type SortKey = "updated_at" | "name" | "stepCount" | "laneCount" | "sessionCount";
+type SortDir = "asc" | "desc";
+
+function compareValues(a: unknown, b: unknown): number {
+  if (a == null && b == null) return 0;
+  if (a == null) return -1;
+  if (b == null) return 1;
+
+  // Dates (ISO strings)
+  if (typeof a === "string" && typeof b === "string") {
+    const aTime = Date.parse(a);
+    const bTime = Date.parse(b);
+    if (!Number.isNaN(aTime) && !Number.isNaN(bTime)) return aTime - bTime;
+    return a.localeCompare(b);
+  }
+
+  if (typeof a === "number" && typeof b === "number") return a - b;
+  return String(a).localeCompare(String(b));
 }
 
 export default function WorkflowsPage() {
@@ -67,6 +92,14 @@ export default function WorkflowsPage() {
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [newWorkflow, setNewWorkflow] = useState({ name: "", description: "" });
+
+  const [viewMode, setViewMode] = useState<ViewMode>("grid");
+  const [sortKey, setSortKey] = useState<SortKey>("updated_at");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
+
+  const [laneFilter, setLaneFilter] = useState<"all" | "1" | "2" | "3" | "4+">("all");
+  const [stepsFilter, setStepsFilter] = useState<"all" | "0-5" | "6-10" | "11-20" | "21+">("all");
+  const [sessionsFilter, setSessionsFilter] = useState<"all" | "0" | "1+">("all");
 
   const loadWorkflows = useCallback(async () => {
     try {
@@ -90,17 +123,71 @@ export default function WorkflowsPage() {
     loadWorkflows();
   }, [loadWorkflows]);
 
+  // Persist view mode
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem("workflows.viewMode");
+      if (saved === "grid" || saved === "list") setViewMode(saved);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("workflows.viewMode", viewMode);
+    } catch {
+      // ignore
+    }
+  }, [viewMode]);
+
   // Handle import success
   const handleImportSuccess = useCallback(() => {
     // Refresh the workflows list
     loadWorkflows();
   }, [loadWorkflows]);
 
-  const filteredWorkflows = workflows.filter(
-    (workflow) =>
-      workflow.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (workflow.description?.toLowerCase().includes(searchQuery.toLowerCase()) ?? false)
-  );
+  const filteredWorkflows = workflows
+    .filter((workflow) => {
+      const q = searchQuery.trim().toLowerCase();
+      if (!q) return true;
+      return (
+        workflow.name.toLowerCase().includes(q) ||
+        (workflow.description?.toLowerCase().includes(q) ?? false)
+      );
+    })
+    .filter((workflow) => {
+      if (laneFilter === "all") return true;
+      if (laneFilter === "4+") return workflow.laneCount >= 4;
+      return workflow.laneCount === Number(laneFilter);
+    })
+    .filter((workflow) => {
+      if (stepsFilter === "all") return true;
+      if (stepsFilter === "0-5") return workflow.stepCount >= 0 && workflow.stepCount <= 5;
+      if (stepsFilter === "6-10") return workflow.stepCount >= 6 && workflow.stepCount <= 10;
+      if (stepsFilter === "11-20") return workflow.stepCount >= 11 && workflow.stepCount <= 20;
+      return workflow.stepCount >= 21;
+    })
+    .filter((workflow) => {
+      if (sessionsFilter === "all") return true;
+      if (sessionsFilter === "0") return workflow.sessionCount === 0;
+      return workflow.sessionCount >= 1;
+    })
+    .sort((a, b) => {
+      const aVal = a[sortKey];
+      const bVal = b[sortKey];
+      const cmp = compareValues(aVal, bVal);
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+
+  const toggleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSortKey(key);
+    setSortDir(key === "name" ? "asc" : "desc");
+  };
 
   const handleCreateWorkflow = async () => {
     if (!newWorkflow.name.trim()) return;
@@ -252,15 +339,101 @@ export default function WorkflowsPage() {
       />
 
       <div className="flex-1 p-6 space-y-6 overflow-auto">
-        {/* Search */}
-        <div className="relative max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search workflows..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-10"
-          />
+        {/* Search + View/Filters */}
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-col lg:flex-row lg:items-center gap-3">
+            <div className="relative max-w-md w-full">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search workflows..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-10"
+              />
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              <Button
+                type="button"
+                variant={viewMode === "grid" ? "default" : "outline"}
+                className={viewMode === "grid" ? "bg-brand-navy text-white hover:bg-brand-navy/90" : "bg-white"}
+                onClick={() => setViewMode("grid")}
+              >
+                <LayoutGrid className="mr-2 h-4 w-4" />
+                Grid
+              </Button>
+              <Button
+                type="button"
+                variant={viewMode === "list" ? "default" : "outline"}
+                className={viewMode === "list" ? "bg-brand-navy text-white hover:bg-brand-navy/90" : "bg-white"}
+                onClick={() => setViewMode("list")}
+              >
+                <List className="mr-2 h-4 w-4" />
+                List
+              </Button>
+
+              {/* Quick filters (List view is where these shine, but apply to both) */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" className="bg-white">
+                    Lanes: {laneFilter}
+                    <ArrowUpDown className="ml-2 h-4 w-4 opacity-60" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  {(["all", "1", "2", "3", "4+"] as const).map((v) => (
+                    <DropdownMenuItem key={v} onClick={() => setLaneFilter(v)}>
+                      {v === "all" ? "All lanes" : v === "4+" ? "4+ lanes" : `${v} lane${v === "1" ? "" : "s"}`}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" className="bg-white">
+                    Steps: {stepsFilter}
+                    <ArrowUpDown className="ml-2 h-4 w-4 opacity-60" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  {(["all", "0-5", "6-10", "11-20", "21+"] as const).map((v) => (
+                    <DropdownMenuItem key={v} onClick={() => setStepsFilter(v)}>
+                      {v === "all" ? "All steps" : `${v} steps`}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" className="bg-white">
+                    Sessions: {sessionsFilter}
+                    <ArrowUpDown className="ml-2 h-4 w-4 opacity-60" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  <DropdownMenuItem onClick={() => setSessionsFilter("all")}>All</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setSessionsFilter("0")}>0 sessions</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setSessionsFilter("1+")}>1+ sessions</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+
+              {(laneFilter !== "all" || stepsFilter !== "all" || sessionsFilter !== "all") && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => {
+                    setLaneFilter("all");
+                    setStepsFilter("all");
+                    setSessionsFilter("all");
+                  }}
+                >
+                  Clear filters
+                </Button>
+              )}
+            </div>
+          </div>
         </div>
 
         {/* Loading State */}
@@ -271,8 +444,9 @@ export default function WorkflowsPage() {
         ) : (
           <>
             {/* Workflow Grid */}
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {filteredWorkflows.map((workflow) => (
+            {viewMode === "grid" ? (
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                {filteredWorkflows.map((workflow) => (
                 <Card
                   key={workflow.id}
                   className="group hover:shadow-md transition-all duration-200"
@@ -363,8 +537,129 @@ export default function WorkflowsPage() {
                     </div>
                   </CardContent>
                 </Card>
-              ))}
-            </div>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-lg border bg-white overflow-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="min-w-[260px]">
+                        <button
+                          type="button"
+                          className="inline-flex items-center gap-2 font-medium"
+                          onClick={() => toggleSort("name")}
+                        >
+                          Workflow
+                          <ArrowUpDown className="h-4 w-4 opacity-60" />
+                        </button>
+                      </TableHead>
+                      <TableHead className="min-w-[320px]">Description</TableHead>
+                      <TableHead>
+                        <button type="button" className="inline-flex items-center gap-2" onClick={() => toggleSort("stepCount")}>
+                          Steps
+                          <ArrowUpDown className="h-4 w-4 opacity-60" />
+                        </button>
+                      </TableHead>
+                      <TableHead>
+                        <button type="button" className="inline-flex items-center gap-2" onClick={() => toggleSort("laneCount")}>
+                          Lanes
+                          <ArrowUpDown className="h-4 w-4 opacity-60" />
+                        </button>
+                      </TableHead>
+                      <TableHead>
+                        <button type="button" className="inline-flex items-center gap-2" onClick={() => toggleSort("sessionCount")}>
+                          Sessions
+                          <ArrowUpDown className="h-4 w-4 opacity-60" />
+                        </button>
+                      </TableHead>
+                      <TableHead className="min-w-[140px]">
+                        <button
+                          type="button"
+                          className="inline-flex items-center gap-2"
+                          onClick={() => toggleSort("updated_at")}
+                        >
+                          Updated
+                          <ArrowUpDown className="h-4 w-4 opacity-60" />
+                        </button>
+                      </TableHead>
+                      <TableHead className="min-w-[220px] text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredWorkflows.map((workflow) => (
+                      <TableRow key={workflow.id} className="hover:bg-muted/30">
+                        <TableCell className="font-medium">
+                          <div className="flex items-center gap-2">
+                            <div className="p-1.5 rounded-md bg-brand-navy/10">
+                              <GitBranch className="h-4 w-4 text-brand-navy" />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="truncate">{workflow.name}</div>
+                              <div className="text-xs text-muted-foreground truncate">
+                                by {workflow.created_by || "Unknown"}
+                              </div>
+                            </div>
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">
+                          <span className="line-clamp-2">
+                            {workflow.description || "No description provided"}
+                          </span>
+                        </TableCell>
+                        <TableCell>{workflow.stepCount}</TableCell>
+                        <TableCell>{workflow.laneCount}</TableCell>
+                        <TableCell>{workflow.sessionCount}</TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {new Date(workflow.updated_at).toLocaleDateString()}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="inline-flex items-center gap-2">
+                            <Button asChild variant="outline" size="sm" className="bg-white">
+                              <Link href={`/workflows/${workflow.id}`}>
+                                View
+                                <ArrowRight className="ml-2 h-4 w-4" />
+                              </Link>
+                            </Button>
+                            <Button
+                              asChild
+                              size="sm"
+                              className="bg-brand-gold hover:bg-brand-gold/90 text-brand-navy"
+                            >
+                              <Link href={`/sessions/new?workflow=${workflow.id}`}>
+                                <Play className="h-4 w-4" />
+                              </Link>
+                            </Button>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon" className="h-8 w-8">
+                                  <MoreVertical className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem asChild>
+                                  <Link href={`/workflows/${workflow.id}`}>
+                                    <Edit className="mr-2 h-4 w-4" />
+                                    Edit
+                                  </Link>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  className="text-destructive"
+                                  onClick={() => handleDeleteWorkflow(workflow.id)}
+                                >
+                                  <Trash2 className="mr-2 h-4 w-4" />
+                                  Delete
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
 
             {filteredWorkflows.length === 0 && !isLoading && (
               <div className="text-center py-12">
