@@ -545,12 +545,14 @@ export default function WorkflowDetailPage() {
         chartElementId: "workflow-process-map-export",
         reactFlowInstance: reactFlowInstanceRef.current || undefined,
       });
+      
+      toast({ title: "PDF exported", description: "Your workflow PDF has been downloaded." });
     } catch (error) {
       console.error("Failed to export PDF:", error);
       toast({
         variant: "destructive",
         title: "Export failed",
-        description: "Could not export workflow as PDF.",
+        description: error instanceof Error ? error.message : "Could not export workflow as PDF.",
       });
     }
   }, [workflow, steps, connections, toast]);

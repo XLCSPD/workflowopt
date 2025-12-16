@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Bell, Search, HelpCircle, CheckCheck, Trash2, Loader2 } from "lucide-react";
+import { Bell, Search, CheckCheck, Trash2, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -25,6 +25,7 @@ import {
 } from "@/lib/services/notifications";
 import { useAuthStore } from "@/lib/stores/authStore";
 import { cn } from "@/lib/utils";
+import { HelpButton } from "@/components/help";
 
 interface HeaderProps {
   title: string;
@@ -138,10 +139,8 @@ export function Header({ title, description, actions }: HeaderProps) {
         {/* Actions slot */}
         {actions}
 
-        {/* Help - hidden on small mobile */}
-        <Button variant="ghost" size="icon" className="h-8 w-8 sm:h-9 sm:w-9 hidden sm:flex">
-          <HelpCircle className="h-4 w-4 sm:h-5 sm:w-5 text-muted-foreground" />
-        </Button>
+        {/* Help Button */}
+        <HelpButton className="h-8 w-8 sm:h-9 sm:w-9 hidden sm:flex" />
 
         {/* Notifications */}
         <DropdownMenu open={isOpen} onOpenChange={setIsOpen}>

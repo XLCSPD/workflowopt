@@ -190,8 +190,28 @@ export function WorkflowImportDialog({
 
     if (result.valid) {
       setCurrentStep("preview");
+    } else {
+      const first =
+        result.errors[0]?.message ||
+        (result.errors[0]?.field ? `${result.errors[0]?.field}: invalid` : undefined) ||
+        "Could not validate the import file.";
+      toast({
+        variant: "destructive",
+        title: "Validation failed",
+        description: `${first} (${result.errors.length} error${
+          result.errors.length === 1 ? "" : "s"
+        }). Scroll down to see details.`,
+      });
     }
-  }, [activeTab, jsonContent, csvContent, connectionsCsvContent, hasConnectionsFile, workflowName]);
+  }, [
+    activeTab,
+    jsonContent,
+    csvContent,
+    connectionsCsvContent,
+    hasConnectionsFile,
+    workflowName,
+    toast,
+  ]);
 
   // Execute import
   const handleImport = useCallback(async () => {
@@ -299,7 +319,7 @@ export function WorkflowImportDialog({
         </DialogHeader>
 
         {currentStep === "upload" && (
-          <div className="flex-1 overflow-hidden">
+          <div className="flex-1 overflow-auto">
             <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as ImportTab)}>
               <TabsList className="grid w-full grid-cols-2">
                 <TabsTrigger value="json" className="flex items-center gap-2">
