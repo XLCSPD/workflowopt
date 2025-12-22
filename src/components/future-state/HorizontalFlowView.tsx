@@ -34,7 +34,6 @@ import {
   CheckCircle2,
   Sparkles,
   AlertTriangle,
-  Play,
   LayoutGrid,
   ZoomIn,
   ZoomOut,
@@ -143,7 +142,7 @@ const actionColors = {
   },
 };
 
-const designStatusConfig: Record<StepDesignStatus, { icon: typeof CheckCircle2; color: string }> = {
+const _designStatusConfig: Record<StepDesignStatus, { icon: typeof CheckCircle2; color: string }> = {
   strategy_only: { icon: Layers, color: "text-gray-400" },
   needs_step_design: { icon: AlertCircle, color: "text-amber-500" },
   step_design_complete: { icon: CheckCircle2, color: "text-emerald-500" },
@@ -376,24 +375,16 @@ function HorizontalFlowViewInner({
   // Build nodes and edges based on view state
   useEffect(() => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let flowNodes: Node<any>[] = [];
+    const flowNodes: Node<any>[] = [];
     let flowEdges: Edge[] = [];
 
     // Get unique lanes and create lane position mapping
     const laneSet = new Set<string>();
-    let maxNodesInLane = 0;
     
     if (viewState === "future") {
       futureStateNodes.forEach((n) => laneSet.add(n.lane));
-      // Count max nodes per lane
-      const counts = new Map<string, number>();
-      futureStateNodes.forEach((n) => counts.set(n.lane, (counts.get(n.lane) || 0) + 1));
-      maxNodesInLane = Math.max(...Array.from(counts.values()), 1);
     } else {
       currentSteps.forEach((s) => laneSet.add(s.lane));
-      const counts = new Map<string, number>();
-      currentSteps.forEach((s) => counts.set(s.lane, (counts.get(s.lane) || 0) + 1));
-      maxNodesInLane = Math.max(...Array.from(counts.values()), 1);
     }
     const lanes = Array.from(laneSet);
     setLaneList(lanes);
@@ -493,7 +484,7 @@ function HorizontalFlowViewInner({
             y: laneY,
           },
           data: {
-            label: step.name,
+            label: step.step_name,
             lane: step.lane,
             action: "keep" as const,
             wasteTypes: getStepWasteTypes(step.id),
@@ -555,11 +546,11 @@ function HorizontalFlowViewInner({
   const handleAutoLayout = useCallback(() => {
     if (nodes.length === 0) return;
     
-    const laneList = [...new Set(
+    const laneList = Array.from(new Set(
       nodes
         .filter(n => n.type === "flowStep")
         .map(n => n.data.lane as string)
-    )];
+    ));
     
     const { nodes: layoutedNodes } = getLayoutedElements(nodes, edges, laneList);
     setNodes(layoutedNodes);

@@ -56,13 +56,13 @@ interface StepDesignChatProps {
 // ============================================
 
 export function StepDesignChat({
-  sessionId,
-  futureStateId,
+  sessionId: _sessionId,
+  futureStateId: _futureStateId,
   nodeId,
   userId,
   nodeName,
   initialQuestions = [],
-  existingContext,
+  existingContext: _existingContext,
   onContextComplete,
   onGenerateDesign,
 }: StepDesignChatProps) {
