@@ -190,10 +190,8 @@ function TagInput({ value, onChange, placeholder, className }: TagInputProps) {
 // DYNAMIC LIST COMPONENT
 // ============================================
 
-interface DynamicListItem {
-  id?: string;
-  [key: string]: string | number | undefined;
-}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type DynamicListItem = Record<string, any>;
 
 interface DynamicListProps<T extends DynamicListItem> {
   items: T[];
