@@ -53,6 +53,7 @@ import {
   Workflow,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useToast } from "@/hooks/use-toast";
 import type {
   FutureState,
   FutureStateNode,
@@ -132,6 +133,7 @@ export function FutureStateDesigner({
   // Realtime studio for future use with presence/cursors
   void _realtimeStudio;
   const supabase = getSupabaseClient();
+  const { toast } = useToast();
 
   // Fetch data
   const fetchData = useCallback(async () => {
@@ -275,6 +277,7 @@ export function FutureStateDesigner({
   const handleRunDesign = async () => {
     setIsRunning(true);
     try {
+      console.log("[FutureStateDesigner] Starting design agent...");
       const response = await fetch("/api/future-state/design", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -283,16 +286,33 @@ export function FutureStateDesigner({
 
       if (!response.ok) {
         const error = await response.json();
-        console.error("Design error:", error);
+        console.error("[FutureStateDesigner] Design error:", error);
+        toast({
+          variant: "destructive",
+          title: "Design Generation Failed",
+          description: error.error || "Failed to generate future state design. Check console for details.",
+        });
       } else {
         const result = await response.json();
+        console.log("[FutureStateDesigner] Design completed:", result);
+        toast({
+          title: "Design Generated",
+          description: result.cached 
+            ? "Loaded cached results from previous run." 
+            : "Successfully generated future state design.",
+        });
         if (result.futureStateId) {
           await fetchFutureStateGraph(result.futureStateId);
         }
         await fetchData();
       }
     } catch (error) {
-      console.error("Error running design:", error);
+      console.error("[FutureStateDesigner] Error running design:", error);
+      toast({
+        variant: "destructive",
+        title: "Design Error",
+        description: error instanceof Error ? error.message : "Network error occurred. Please try again.",
+      });
     } finally {
       setIsRunning(false);
     }

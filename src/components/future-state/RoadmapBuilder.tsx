@@ -21,6 +21,7 @@ import {
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
+import { useToast } from "@/hooks/use-toast";
 import type { ImplementationWave, SolutionCard, SolutionDependency, ImplementationItem, StepDesignOption } from "@/types";
 
 interface RoadmapBuilderProps {
@@ -58,6 +59,7 @@ export function RoadmapBuilder({ sessionId }: RoadmapBuilderProps) {
 
   void useAuthStore; // Reserved for future presence integration
   const supabase = getSupabaseClient();
+  const { toast } = useToast();
 
   // Fetch data
   const fetchData = useCallback(async () => {
@@ -148,6 +150,7 @@ export function RoadmapBuilder({ sessionId }: RoadmapBuilderProps) {
   const handleRunSequencing = async () => {
     setIsRunning(true);
     try {
+      console.log("[RoadmapBuilder] Starting sequencing agent...");
       const response = await fetch("/api/future-state/sequencing", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -156,12 +159,30 @@ export function RoadmapBuilder({ sessionId }: RoadmapBuilderProps) {
 
       if (!response.ok) {
         const error = await response.json();
-        console.error("Sequencing error:", error);
+        console.error("[RoadmapBuilder] Sequencing error:", error);
+        toast({
+          variant: "destructive",
+          title: "Sequencing Failed",
+          description: error.error || "Failed to run sequencing agent. Check console for details.",
+        });
       } else {
+        const result = await response.json();
+        console.log("[RoadmapBuilder] Sequencing completed:", result);
+        toast({
+          title: "Sequencing Complete",
+          description: result.cached 
+            ? "Loaded cached results from previous run." 
+            : `Successfully created ${result.data?.waves?.length || 0} implementation waves.`,
+        });
         await fetchData();
       }
     } catch (error) {
-      console.error("Error running sequencing:", error);
+      console.error("[RoadmapBuilder] Error running sequencing:", error);
+      toast({
+        variant: "destructive",
+        title: "Sequencing Error",
+        description: error instanceof Error ? error.message : "Network error occurred. Please try again.",
+      });
     } finally {
       setIsRunning(false);
     }

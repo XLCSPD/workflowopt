@@ -37,6 +37,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
+import { useToast } from "@/hooks/use-toast";
 import { StepDesignChat } from "./StepDesignChat";
 import type {
   FutureStateNode,
@@ -106,6 +107,7 @@ export function StepDesignPanel({
   );
   const mountedRef = useRef(true);
   const fetchIdRef = useRef(0);
+  const { toast } = useToast();
 
   useEffect(() => {
     mountedRef.current = true;
@@ -276,6 +278,7 @@ export function StepDesignPanel({
   const handleRunAgent = async () => {
     setIsRunning(true);
     try {
+      console.log("[StepDesignPanel] Starting step design agent...");
       const response = await fetch("/api/future-state/step-design", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -289,12 +292,18 @@ export function StepDesignPanel({
       });
 
       if (!response.ok) {
-        const error = await response.json();
-        console.error("Step design error:", error);
+        const errorData = await response.json();
+        console.error("[StepDesignPanel] Step design error:", errorData);
+        toast({
+          variant: "destructive",
+          title: "Step Design Failed",
+          description: errorData.error || "Failed to generate step design. Check console for details.",
+        });
         return;
       }
 
       const result = await response.json();
+      console.log("[StepDesignPanel] Step design completed:", result);
       
       // Update state with new options
       setState((prev) => ({
@@ -306,6 +315,10 @@ export function StepDesignPanel({
 
       // Handle new questions if any - automatically open chat
       if (result.questions?.length > 0) {
+        toast({
+          title: "Questions Needed",
+          description: `AI needs ${result.questions.length} answer(s) to generate better design options.`,
+        });
         setPendingQuestions(
           result.questions.map((q: { id: string; question: string; required: boolean }) => ({
             id: q.id,
@@ -317,13 +330,22 @@ export function StepDesignPanel({
         setSelectedTab("context");
         setShowChat(true); // Automatically open chat for Q&A
       } else if (result.options?.length > 0) {
+        toast({
+          title: "Design Options Generated",
+          description: `Successfully generated ${result.options.length} design option(s).`,
+        });
         // Successfully generated options - switch to Options tab
         setSelectedTab("options");
         setShowChat(false);
         setPendingQuestions([]); // Clear any answered questions
       }
     } catch (error) {
-      console.error("Error running step design agent:", error);
+      console.error("[StepDesignPanel] Error running step design agent:", error);
+      toast({
+        variant: "destructive",
+        title: "Step Design Error",
+        description: error instanceof Error ? error.message : "Network error occurred. Please try again.",
+      });
     } finally {
       setIsRunning(false);
     }

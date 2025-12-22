@@ -38,6 +38,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
+import { useToast } from "@/hooks/use-toast";
 import type { InsightTheme, ObservationWithWasteTypes, ProcessStep, WasteType } from "@/types";
 
 interface SynthesisHubProps {
@@ -66,6 +67,7 @@ export function SynthesisHub({ sessionId }: SynthesisHubProps) {
   
   const { user } = useAuthStore();
   const supabase = getSupabaseClient();
+  const { toast } = useToast();
 
   // Fetch themes and observations
   const fetchData = useCallback(async () => {
@@ -135,6 +137,7 @@ export function SynthesisHub({ sessionId }: SynthesisHubProps) {
   const handleRunSynthesis = async () => {
     setIsRunning(true);
     try {
+      console.log("[SynthesisHub] Starting synthesis agent...");
       const response = await fetch("/api/future-state/synthesis", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -143,12 +146,30 @@ export function SynthesisHub({ sessionId }: SynthesisHubProps) {
 
       if (!response.ok) {
         const error = await response.json();
-        console.error("Synthesis error:", error);
+        console.error("[SynthesisHub] Synthesis error:", error);
+        toast({
+          variant: "destructive",
+          title: "Synthesis Failed",
+          description: error.error || "Failed to run synthesis agent. Check console for details.",
+        });
       } else {
+        const result = await response.json();
+        console.log("[SynthesisHub] Synthesis completed:", result);
+        toast({
+          title: "Synthesis Complete",
+          description: result.cached 
+            ? "Loaded cached results from previous run." 
+            : `Successfully identified ${result.data?.themes?.length || 0} themes.`,
+        });
         await fetchData();
       }
     } catch (error) {
-      console.error("Error running synthesis:", error);
+      console.error("[SynthesisHub] Error running synthesis:", error);
+      toast({
+        variant: "destructive",
+        title: "Synthesis Error",
+        description: error instanceof Error ? error.message : "Network error occurred. Please try again.",
+      });
     } finally {
       setIsRunning(false);
     }

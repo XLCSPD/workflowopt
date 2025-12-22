@@ -33,6 +33,7 @@ import {
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
+import { useToast } from "@/hooks/use-toast";
 import type { SolutionCard, InsightTheme, StepDesignStatus } from "@/types";
 
 const stepDesignStatusConfig: Record<StepDesignStatus, { icon: typeof CheckCircle; color: string; label: string; bgColor: string }> = {
@@ -87,6 +88,7 @@ export function SolutionBuilder({ sessionId }: SolutionBuilderProps) {
   const { user } = useAuthStore();
   const supabase = getSupabaseClient();
   const router = useRouter();
+  const { toast } = useToast();
 
   // Fetch solutions and themes
   const fetchData = useCallback(async () => {
@@ -152,6 +154,7 @@ export function SolutionBuilder({ sessionId }: SolutionBuilderProps) {
   const handleRunSolutions = async () => {
     setIsRunning(true);
     try {
+      console.log("[SolutionBuilder] Starting solutions agent...");
       const response = await fetch("/api/future-state/solutions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -160,12 +163,30 @@ export function SolutionBuilder({ sessionId }: SolutionBuilderProps) {
 
       if (!response.ok) {
         const error = await response.json();
-        console.error("Solutions error:", error);
+        console.error("[SolutionBuilder] Solutions error:", error);
+        toast({
+          variant: "destructive",
+          title: "Solutions Generation Failed",
+          description: error.error || "Failed to generate solutions. Check console for details.",
+        });
       } else {
+        const result = await response.json();
+        console.log("[SolutionBuilder] Solutions completed:", result);
+        toast({
+          title: "Solutions Generated",
+          description: result.cached 
+            ? "Loaded cached results from previous run." 
+            : `Successfully generated ${result.data?.solutions?.length || 0} solutions.`,
+        });
         await fetchData();
       }
     } catch (error) {
-      console.error("Error running solutions:", error);
+      console.error("[SolutionBuilder] Error running solutions:", error);
+      toast({
+        variant: "destructive",
+        title: "Solutions Error",
+        description: error instanceof Error ? error.message : "Network error occurred. Please try again.",
+      });
     } finally {
       setIsRunning(false);
     }
