@@ -14,6 +14,7 @@ import ReactFlow, {
   Edge,
   NodeChange,
   ConnectionMode,
+  ConnectionLineType,
   Panel,
   MarkerType,
 } from "reactflow";
@@ -26,6 +27,7 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Flame, LayoutGrid, RotateCcw, Lock, ZoomIn, ZoomOut } from "lucide-react";
 import type { ProcessStep } from "@/types";
+import { STEP_TOOLBOX_MIME } from "@/components/workflow/StepToolbox";
 
 const nodeTypes = {
   stepNode: StepNode,
@@ -33,14 +35,28 @@ const nodeTypes = {
 
 interface ProcessMapProps {
   workflowId: string;
+  lanes?: string[];
+  laneStyles?: Record<string, { bg: string; border: string }>;
   steps: ProcessStep[];
   connections: { source: string; target: string }[];
   observations?: Record<string, { count: number; priorityScore: number }>;
   selectedStepId?: string | null;
   onStepClick?: (stepId: string) => void;
+  onSelectStep?: (stepId: string | null) => void;
+  onQuickAddStep?: (lane: string, position: { x: number; y: number }) => void;
+  onCreateStepFromToolbox?: (input: {
+    type: ProcessStep["step_type"];
+    lane: string;
+    position: { x: number; y: number };
+  }) => void;
+  inlineEditingStepId?: string | null;
+  onStartInlineEditStep?: (stepId: string) => void;
+  onInlineEditStep?: (stepId: string, newName: string) => void;
+  onCancelInlineEditStep?: (stepId: string) => void;
   showHeatmap?: boolean;
   onToggleHeatmap?: (show: boolean) => void;
   isEditMode?: boolean;
+  onDeleteStep?: (stepId: string) => void;
   onConnect?: (sourceId: string, targetId: string) => void;
   onDeleteConnection?: (sourceId: string, targetId: string) => void;
   onReactFlowInit?: (instance: ReactFlowInstance) => void;
@@ -64,7 +80,13 @@ const SWIMLANE_COLOR_PALETTE = [
 ];
 
 // Get color for a swimlane based on its index
-function getSwimlaneColor(laneName: string, laneIndex: number): { bg: string; border: string } {
+function getSwimlaneColor(
+  laneName: string,
+  laneIndex: number,
+  laneStyles?: Record<string, { bg: string; border: string }>
+): { bg: string; border: string } {
+  const custom = laneStyles?.[laneName];
+  if (custom) return custom;
   return SWIMLANE_COLOR_PALETTE[laneIndex % SWIMLANE_COLOR_PALETTE.length];
 }
 
@@ -132,24 +154,56 @@ function getLayoutedElements(
 // Inner component that uses useReactFlow
 function ProcessMapInner({
   workflowId,
+  lanes,
+  laneStyles,
   steps,
   connections,
   observations = {},
   selectedStepId,
   onStepClick,
+  onSelectStep,
+  onQuickAddStep,
+  onCreateStepFromToolbox,
+  inlineEditingStepId,
+  onStartInlineEditStep,
+  onInlineEditStep,
+  onCancelInlineEditStep,
   showHeatmap = false,
   onToggleHeatmap,
   isEditMode = false,
+  onDeleteStep,
   onConnect,
   onDeleteConnection,
   onReactFlowInit,
 }: ProcessMapProps) {
-  const { fitView, zoomIn, zoomOut } = useReactFlow();
+  const { fitView, zoomIn, zoomOut, screenToFlowPosition } = useReactFlow();
   const viewport = useViewport();
+  const canvasRef = useRef<HTMLDivElement | null>(null);
   
   // Use ref to avoid recreating nodes when onStepClick changes
   const onStepClickRef = useRef(onStepClick);
   onStepClickRef.current = onStepClick;
+
+  const onSelectStepRef = useRef(onSelectStep);
+  onSelectStepRef.current = onSelectStep;
+
+  const onQuickAddStepRef = useRef(onQuickAddStep);
+  onQuickAddStepRef.current = onQuickAddStep;
+
+  const onCreateStepFromToolboxRef = useRef(onCreateStepFromToolbox);
+  onCreateStepFromToolboxRef.current = onCreateStepFromToolbox;
+
+  const onStartInlineEditStepRef = useRef(onStartInlineEditStep);
+  onStartInlineEditStepRef.current = onStartInlineEditStep;
+
+  const onInlineEditStepRef = useRef(onInlineEditStep);
+  onInlineEditStepRef.current = onInlineEditStep;
+
+  const onCancelInlineEditStepRef = useRef(onCancelInlineEditStep);
+  onCancelInlineEditStepRef.current = onCancelInlineEditStep;
+
+  const onDeleteStepRef = useRef(onDeleteStep);
+  onDeleteStepRef.current = onDeleteStep;
 
   // Track if layout has been saved
   const [hasLayoutSaved, setHasLayoutSaved] = useState(false);
@@ -175,6 +229,11 @@ function ProcessMapInner({
 
   // Group steps by lane
   const swimlanes = useMemo(() => {
+    // Allow rendering empty lanes for a true \"blank canvas\" editing experience.
+    if (steps.length === 0 && lanes && lanes.length > 0) {
+      return lanes.map((name) => ({ name, steps: [] as ProcessStep[] }));
+    }
+
     const laneMap = new Map<string, ProcessStep[]>();
     steps.forEach((step) => {
       const existing = laneMap.get(step.lane) || [];
@@ -184,12 +243,102 @@ function ProcessMapInner({
       name,
       steps: laneSteps.sort((a, b) => a.order_index - b.order_index),
     }));
-  }, [steps]);
+  }, [steps, lanes]);
 
   // Create stable click handler
-  const handleNodeClick = useCallback((stepId: string) => {
-    onStepClickRef.current?.(stepId);
-  }, []);
+  const handleNodeClick = useCallback(
+    (stepId: string) => {
+      if (isEditMode) {
+        onSelectStepRef.current?.(stepId);
+        return;
+      }
+      onStepClickRef.current?.(stepId);
+    },
+    [isEditMode]
+  );
+
+  const getLaneForY = useCallback(
+    (y: number): string => {
+      if (swimlanes.length === 0) return "Requester";
+      const laneIndex = Math.max(
+        0,
+        Math.min(
+          swimlanes.length - 1,
+          Math.floor((y + NODE_HEIGHT / 2) / SWIMLANE_HEIGHT)
+        )
+      );
+      return swimlanes[laneIndex]?.name ?? swimlanes[0]?.name ?? "Requester";
+    },
+    [swimlanes]
+  );
+
+  const getLaneIndex = useCallback(
+    (laneName: string): number => {
+      const idx = swimlanes.findIndex((l) => l.name === laneName);
+      return idx >= 0 ? idx : 0;
+    },
+    [swimlanes]
+  );
+
+  // Keyboard shortcuts for edit mode
+  useEffect(() => {
+    if (!isEditMode) return;
+
+    const handler = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      const tag = el?.tagName?.toLowerCase();
+      if (tag === "input" || tag === "textarea" || el?.isContentEditable) return;
+
+      // Ignore if user is using browser/system shortcuts.
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+      const key = e.key.toLowerCase();
+
+      if (key === "n") {
+        if (!onQuickAddStepRef.current) return;
+
+        const selected = selectedStepId ? steps.find((s) => s.id === selectedStepId) : null;
+        const lane = selected?.lane ?? swimlanes[0]?.name ?? "Requester";
+        const laneIndex = getLaneIndex(lane);
+
+        const rect = canvasRef.current?.getBoundingClientRect();
+        if (!rect) return;
+
+        const center = screenToFlowPosition({
+          x: rect.left + rect.width / 2,
+          y: rect.top + rect.height / 2,
+        });
+
+        onQuickAddStepRef.current(lane, {
+          x: center.x,
+          y: getSwimlaneYCenter(laneIndex),
+        });
+      } else if (key === "delete" || key === "backspace") {
+        if (!selectedStepId) return;
+        if (!onDeleteStepRef.current) return;
+
+        e.preventDefault();
+        if (confirm("Delete this step?")) onDeleteStepRef.current(selectedStepId);
+      } else if (key === "e") {
+        if (!selectedStepId) return;
+        e.preventDefault();
+        onStepClickRef.current?.(selectedStepId);
+      } else if (key === "escape") {
+        onSelectStepRef.current?.(null);
+        if (selectedStepId) onCancelInlineEditStepRef.current?.(selectedStepId);
+      }
+    };
+
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [
+    isEditMode,
+    selectedStepId,
+    steps,
+    swimlanes,
+    getLaneIndex,
+    screenToFlowPosition,
+  ]);
 
   // Generate initial node positions - now checks for saved positions first
   const initialNodes: Node[] = useMemo(() => {
@@ -214,13 +363,23 @@ function ProcessMapInner({
             priorityScore: 0,
             heatmapIntensity: undefined,
             onClick: () => handleNodeClick(step.id),
+            isInlineEditing: inlineEditingStepId === step.id,
+            onStartInlineEdit: () => onStartInlineEditStepRef.current?.(step.id),
+            onInlineEdit: (newName: string) =>
+              onInlineEditStepRef.current?.(step.id, newName),
+            onCancelInlineEdit: () => onCancelInlineEditStepRef.current?.(step.id),
           },
         });
       });
     });
 
     return nodes;
-  }, [swimlanes, handleNodeClick, savedPositions]);
+  }, [
+    swimlanes,
+    handleNodeClick,
+    savedPositions,
+    inlineEditingStepId,
+  ]);
 
   // Generate edges
   const initialEdges: Edge[] = useMemo(() => {
@@ -272,11 +431,12 @@ function ProcessMapInner({
             observationCount: obs.count,
             priorityScore: obs.priorityScore,
             heatmapIntensity,
+            isInlineEditing: inlineEditingStepId === node.id,
           },
         };
       })
     );
-  }, [selectedStepId, observations, showHeatmap, setNodes]);
+  }, [selectedStepId, observations, showHeatmap, inlineEditingStepId, setNodes]);
 
   // Save layout to localStorage
   const saveLayout = useCallback((nodesToSave: Node[]) => {
@@ -385,7 +545,7 @@ function ProcessMapInner({
         }}
       >
         {swimlanes.map((lane, laneIndex) => {
-          const colors = getSwimlaneColor(lane.name, laneIndex);
+          const colors = getSwimlaneColor(lane.name, laneIndex, laneStyles);
           return (
             <div
               key={lane.name}
@@ -411,7 +571,36 @@ function ProcessMapInner({
       </div>
 
       {/* React Flow Canvas */}
-      <div className="absolute left-32 right-0 top-0 bottom-0">
+      <div
+        ref={canvasRef}
+        className="absolute left-32 right-0 top-0 bottom-0"
+        onDragOver={(e) => {
+          if (!isEditMode) return;
+          if (!onCreateStepFromToolboxRef.current) return;
+          const type = e.dataTransfer.getData(STEP_TOOLBOX_MIME);
+          if (!type) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "copy";
+        }}
+        onDrop={(e) => {
+          if (!isEditMode) return;
+          if (!onCreateStepFromToolboxRef.current) return;
+          const raw = e.dataTransfer.getData(STEP_TOOLBOX_MIME);
+          if (!raw) return;
+          e.preventDefault();
+
+          const flowPos = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+          const lane = getLaneForY(flowPos.y);
+
+          // Validate step type defensively
+          const type = raw as ProcessStep["step_type"];
+          onCreateStepFromToolboxRef.current({
+            type,
+            lane,
+            position: flowPos,
+          });
+        }}
+      >
         {/* Swimlane Background Bands - positioned in viewport space */}
         <div 
           className="absolute left-0 right-0 pointer-events-none z-0"
@@ -420,7 +609,7 @@ function ProcessMapInner({
           }}
         >
           {swimlanes.map((lane, laneIndex) => {
-            const colors = getSwimlaneColor(lane.name, laneIndex);
+            const colors = getSwimlaneColor(lane.name, laneIndex, laneStyles);
             return (
               <div
                 key={lane.name}
@@ -444,6 +633,14 @@ function ProcessMapInner({
           onInit={onReactFlowInit}
           nodeTypes={nodeTypes}
           connectionMode={ConnectionMode.Loose}
+          connectOnClick={isEditMode}
+          connectionLineStyle={{ stroke: "hsl(var(--brand-gold))", strokeWidth: 2 }}
+          connectionLineType={ConnectionLineType.SmoothStep}
+          defaultEdgeOptions={{
+            type: "smoothstep",
+            style: { stroke: "#545454", strokeWidth: 2 },
+            markerEnd: { type: MarkerType.ArrowClosed, color: "#545454" },
+          }}
           fitView
           fitViewOptions={{ padding: 0.2 }}
           minZoom={0.3}
@@ -452,10 +649,18 @@ function ProcessMapInner({
           nodesDraggable={isEditMode}
           nodesConnectable={isEditMode}
           elementsSelectable={isEditMode || !!onStepClick}
-          onNodeClick={(_event, node) => {
-            if (!isEditMode && onStepClick) {
-              onStepClick(node.id);
-            }
+          onPaneClick={(event) => {
+            // ReactFlow doesn't have a dedicated onPaneDoubleClick; use click.detail (2 == double click).
+            if (!isEditMode) return;
+            if (event.detail !== 2) return;
+            if (!onQuickAddStepRef.current) return;
+
+            const flowPos = screenToFlowPosition({
+              x: event.clientX,
+              y: event.clientY,
+            });
+            const lane = getLaneForY(flowPos.y);
+            onQuickAddStepRef.current(lane, flowPos);
           }}
           onConnect={isEditMode ? (params) => {
             if (params.source && params.target && onConnect) {
@@ -485,8 +690,12 @@ function ProcessMapInner({
           {/* Controls Panel */}
           <Panel position="top-right" className="flex items-center gap-2">
             {isEditMode && (
-              <div className="flex items-center gap-1 bg-orange-50 text-orange-700 rounded-lg border border-orange-200 px-2 py-1.5 shadow-sm">
-                <span className="text-xs font-medium">Drag nodes to reposition. Click edges to delete.</span>
+              <div className="flex items-center gap-2 bg-orange-50 text-orange-700 rounded-lg border border-orange-200 px-2 py-1.5 shadow-sm">
+                <span className="text-xs font-medium">Drag nodes. Double-click canvas to add.</span>
+                <span className="keyboard-shortcuts-help">[N] Add</span>
+                <span className="keyboard-shortcuts-help">[Del] Remove</span>
+                <span className="keyboard-shortcuts-help">[E] Edit</span>
+                <span className="keyboard-shortcuts-help">[Esc] Deselect</span>
               </div>
             )}
             <Button

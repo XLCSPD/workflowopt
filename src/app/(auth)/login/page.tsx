@@ -1,12 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Loader2 } from "lucide-react";
+import { Loader2, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { VersatexLogo } from "@/components/branding/VersatexLogo";
@@ -37,9 +36,9 @@ const loginSchema = z.object({
 type LoginFormData = z.infer<typeof loginSchema>;
 
 export default function LoginPage() {
-  const router = useRouter();
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const supabase = getSupabaseClient();
 
   const form = useForm<LoginFormData>({
@@ -72,8 +71,8 @@ export default function LoginPage() {
         description: "You have been logged in successfully.",
       });
       
-      router.push("/dashboard");
-      router.refresh();
+      // Use window.location for a full page reload to ensure session cookies are properly set
+      window.location.href = "/dashboard";
     } catch {
       toast({
         variant: "destructive",
@@ -86,10 +85,23 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-brand-platinum via-white to-brand-platinum p-4">
-      <div className="absolute inset-0 bg-[url('/grid.svg')] bg-center opacity-5" />
+    <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden">
+      {/* Video Background */}
+      <video
+        autoPlay
+        loop
+        muted
+        playsInline
+        className="absolute inset-0 w-full h-full object-cover"
+      >
+        <source src="/videos/Process_Redesign_Animation_Generation.mp4" type="video/mp4" />
+      </video>
       
-      <Card className="w-full max-w-md relative z-10 shadow-xl border-0 bg-white/80 backdrop-blur-sm">
+      {/* Dark overlay for better card visibility */}
+      <div className="absolute inset-0 bg-brand-navy/40 backdrop-blur-[2px]" />
+      
+      {/* Card with subtle glow animation */}
+      <Card className="w-full max-w-md relative z-10 shadow-2xl border-0 bg-gray-100/90 backdrop-blur-md animate-glow-pulse">
         <CardHeader className="space-y-4 text-center pb-2">
           <div className="flex justify-center">
             <VersatexLogo variant="auth" priority />
@@ -133,12 +145,26 @@ export default function LoginPage() {
                   <FormItem>
                     <FormLabel>Password</FormLabel>
                     <FormControl>
-                      <Input
-                        type="password"
-                        placeholder="••••••••"
-                        className="h-11"
-                        {...field}
-                      />
+                      <div className="relative">
+                        <Input
+                          type={showPassword ? "text" : "password"}
+                          placeholder="••••••••"
+                          className="h-11 pr-10"
+                          {...field}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPassword(!showPassword)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-brand-navy transition-colors"
+                          tabIndex={-1}
+                        >
+                          {showPassword ? (
+                            <EyeOff className="h-4 w-4" />
+                          ) : (
+                            <Eye className="h-4 w-4" />
+                          )}
+                        </button>
+                      </div>
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -184,4 +210,3 @@ export default function LoginPage() {
     </div>
   );
 }
-

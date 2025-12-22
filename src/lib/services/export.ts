@@ -2,6 +2,17 @@ import { getSessionById } from "./sessions";
 import { getObservationsBySession } from "./observations";
 import { getWasteDistribution, getWasteByLane, getTopHotspots } from "./analytics";
 import type { ReactFlowInstance, Node as ReactFlowNode } from "reactflow";
+import { getSupabaseClient } from "@/lib/supabase/client";
+import type {
+  InsightTheme,
+  SolutionCard,
+  ImplementationWave,
+  FutureState,
+  FutureStateNode,
+  StepDesignVersion,
+  StepDesignOption,
+  DesignAssumption,
+} from "@/types";
 
 export interface ExportSections {
   wasteDistribution: boolean;
@@ -9,6 +20,18 @@ export interface ExportSections {
   topOpportunities: boolean;
   participantActivity: boolean;
   rawData: boolean;
+}
+
+export interface FutureStateExportSections {
+  executiveSummary: boolean;
+  futureStateDiagram: boolean;
+  solutionRegister: boolean;
+  roadmap: boolean;
+  themeAnalysis: boolean;
+  comparisonMetrics: boolean;
+  stepDesignSpecs: boolean;
+  traceabilityMatrix: boolean;
+  implementationNotes: boolean;
 }
 
 // ============================================
@@ -797,4 +820,834 @@ export async function exportToCSV(sessionId: string): Promise<void> {
   a.download = `session-${sessionId}-observations.csv`;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+// ============================================
+// FUTURE STATE STUDIO EXPORTS
+// ============================================
+
+interface FutureStateStudioData {
+  session: { id: string; name: string };
+  themes: InsightTheme[];
+  solutions: SolutionCard[];
+  waves: Array<ImplementationWave & { solutions?: SolutionCard[] }>;
+  futureStates: Array<FutureState & { nodes?: FutureStateNode[] }>;
+  currentStepCount: number;
+}
+
+async function fetchFutureStateStudioData(sessionId: string): Promise<FutureStateStudioData | null> {
+  const supabase = getSupabaseClient();
+
+  const { data: session } = await supabase
+    .from("sessions")
+    .select("id, name, process_id")
+    .eq("id", sessionId)
+    .single();
+
+  if (!session) return null;
+
+  const [themesRes, solutionsRes, wavesRes, futureStatesRes, stepsRes] = await Promise.all([
+    supabase
+      .from("insight_themes")
+      .select("*")
+      .eq("session_id", sessionId)
+      .order("created_at"),
+    supabase
+      .from("solution_cards")
+      .select("*")
+      .eq("session_id", sessionId)
+      .order("created_at"),
+    supabase
+      .from("implementation_waves")
+      .select(`
+        *,
+        wave_solutions(
+          solution:solution_cards(*)
+        )
+      `)
+      .eq("session_id", sessionId)
+      .order("order_index"),
+    supabase
+      .from("future_states")
+      .select(`
+        *,
+        nodes:future_state_nodes(*)
+      `)
+      .eq("session_id", sessionId)
+      .order("version", { ascending: false }),
+    supabase
+      .from("process_steps")
+      .select("id")
+      .eq("process_id", session.process_id),
+  ]);
+
+  return {
+    session: { id: session.id, name: session.name },
+    themes: (themesRes.data || []) as InsightTheme[],
+    solutions: (solutionsRes.data || []) as SolutionCard[],
+    waves: (wavesRes.data || []).map((w: ImplementationWave & { wave_solutions?: Array<{ solution: SolutionCard }> }) => ({
+      ...w,
+      solutions: (w.wave_solutions || []).map((ws) => ws.solution) || [],
+    })) as Array<ImplementationWave & { solutions?: SolutionCard[] }>,
+    futureStates: (futureStatesRes.data || []) as Array<FutureState & { nodes?: FutureStateNode[] }>,
+    currentStepCount: stepsRes.data?.length || 0,
+  };
+}
+
+/**
+ * Export Future State Studio Executive Summary PDF
+ */
+export async function exportFutureStateSummaryPDF(sessionId: string): Promise<void> {
+  const data = await fetchFutureStateStudioData(sessionId);
+  if (!data) throw new Error("Session not found");
+
+  const jsPDFModule = await import("jspdf");
+  const jsPDF = jsPDFModule.default;
+  const autoTableModule = await import("jspdf-autotable");
+  const autoTable = autoTableModule.default;
+
+  const doc = new jsPDF();
+  void autoTable;
+
+  const brandGold = [255, 192, 0] as [number, number, number];
+  const brandNavy = [16, 42, 67] as [number, number, number];
+  let yPosition = 20;
+
+  // Title
+  doc.setFontSize(24);
+  doc.setTextColor(...brandNavy);
+  doc.text("Future State Studio", 20, yPosition);
+  yPosition += 10;
+  doc.setFontSize(16);
+  doc.text("Executive Summary", 20, yPosition);
+  yPosition += 10;
+
+  // Session info
+  doc.setFontSize(12);
+  doc.setTextColor(100, 100, 100);
+  doc.text(`Session: ${data.session.name}`, 20, yPosition);
+  yPosition += 6;
+  doc.text(`Generated: ${new Date().toLocaleDateString()}`, 20, yPosition);
+  yPosition += 15;
+
+  // Key Metrics
+  doc.setFontSize(16);
+  doc.setTextColor(...brandNavy);
+  doc.text("Key Metrics", 20, yPosition);
+  yPosition += 10;
+
+  const latestFutureState = data.futureStates[0];
+  const futureNodes = latestFutureState?.nodes || [];
+  const removedCount = futureNodes.filter((n) => n.action === "remove").length;
+  const modifiedCount = futureNodes.filter((n) => n.action === "modify").length;
+  const newCount = futureNodes.filter((n) => n.action === "new").length;
+  const futureStepCount = futureNodes.filter((n) => n.action !== "remove").length;
+
+  autoTable(doc, {
+    startY: yPosition,
+    head: [["Metric", "Value"]],
+    body: [
+      ["Themes Identified", data.themes.length.toString()],
+      ["Solutions Proposed", data.solutions.length.toString()],
+      ["Solutions Accepted", data.solutions.filter((s) => s.status === "accepted").length.toString()],
+      ["Implementation Waves", data.waves.length.toString()],
+      ["Current Process Steps", data.currentStepCount.toString()],
+      ["Future Process Steps", futureStepCount.toString()],
+      ["Steps Eliminated", removedCount.toString()],
+      ["Steps Modified", modifiedCount.toString()],
+      ["New Steps", newCount.toString()],
+    ],
+    headStyles: {
+      fillColor: brandGold,
+      textColor: brandNavy,
+      fontStyle: "bold",
+    },
+    alternateRowStyles: { fillColor: [245, 245, 245] },
+    columnStyles: { 0: { fontStyle: "bold" } },
+  });
+
+  yPosition = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 15;
+
+  // Themes Summary
+  if (data.themes.length > 0) {
+    if (yPosition > 200) {
+      doc.addPage();
+      yPosition = 20;
+    }
+
+    doc.setFontSize(16);
+    doc.setTextColor(...brandNavy);
+    doc.text("Identified Themes", 20, yPosition);
+    yPosition += 10;
+
+    autoTable(doc, {
+      startY: yPosition,
+      head: [["Theme", "Status", "Confidence"]],
+      body: data.themes.map((t) => [
+        t.name,
+        t.status,
+        t.confidence || "N/A",
+      ]),
+      headStyles: {
+        fillColor: brandGold,
+        textColor: brandNavy,
+        fontStyle: "bold",
+      },
+      alternateRowStyles: { fillColor: [245, 245, 245] },
+    });
+
+    yPosition = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 15;
+  }
+
+  // Solutions Summary
+  if (data.solutions.filter((s) => s.status === "accepted").length > 0) {
+    if (yPosition > 180) {
+      doc.addPage();
+      yPosition = 20;
+    }
+
+    doc.setFontSize(16);
+    doc.setTextColor(...brandNavy);
+    doc.text("Accepted Solutions", 20, yPosition);
+    yPosition += 10;
+
+    const acceptedSolutions = data.solutions.filter((s) => s.status === "accepted");
+    autoTable(doc, {
+      startY: yPosition,
+      head: [["Solution", "Type", "Effort", "Wave"]],
+      body: acceptedSolutions.map((s) => [
+        s.title,
+        s.bucket,
+        s.effort_level || "N/A",
+        s.recommended_wave || "N/A",
+      ]),
+      headStyles: {
+        fillColor: brandGold,
+        textColor: brandNavy,
+        fontStyle: "bold",
+      },
+      alternateRowStyles: { fillColor: [245, 245, 245] },
+    });
+  }
+
+  // Footer
+  const pageCount = doc.getNumberOfPages();
+  for (let i = 1; i <= pageCount; i++) {
+    doc.setPage(i);
+    doc.setFontSize(9);
+    doc.setTextColor(150, 150, 150);
+    doc.text(
+      `Page ${i} of ${pageCount} | Future State Studio | ${new Date().toLocaleDateString()}`,
+      doc.internal.pageSize.getWidth() / 2,
+      doc.internal.pageSize.getHeight() - 10,
+      { align: "center" }
+    );
+  }
+
+  doc.save(`${data.session.name}-executive-summary.pdf`);
+}
+
+/**
+ * Export Solution Register to Excel/CSV
+ */
+export async function exportSolutionRegister(sessionId: string): Promise<void> {
+  const data = await fetchFutureStateStudioData(sessionId);
+  if (!data) throw new Error("Session not found");
+
+  const headers = [
+    "Solution",
+    "Type",
+    "Description",
+    "Expected Impact",
+    "Effort Level",
+    "Risks",
+    "Dependencies",
+    "Recommended Wave",
+    "Status",
+  ];
+
+  const rows = data.solutions.map((s) => [
+    s.title,
+    s.bucket,
+    (s.description || "").replace(/,/g, ";").replace(/\n/g, " "),
+    (s.expected_impact || "").replace(/,/g, ";").replace(/\n/g, " "),
+    s.effort_level || "",
+    (s.risks || []).join("; "),
+    (s.dependencies || []).join("; "),
+    s.recommended_wave || "",
+    s.status,
+  ]);
+
+  const csv = [headers, ...rows].map((row) => row.join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${data.session.name}-solution-register.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * Export Implementation Roadmap to CSV (for import into presentation tools)
+ */
+export async function exportRoadmapCSV(sessionId: string): Promise<void> {
+  const data = await fetchFutureStateStudioData(sessionId);
+  if (!data) throw new Error("Session not found");
+
+  const headers = [
+    "Wave Name",
+    "Wave Order",
+    "Start Estimate",
+    "End Estimate",
+    "Solution",
+    "Solution Type",
+    "Solution Status",
+    "Effort Level",
+  ];
+
+  const rows: string[][] = [];
+
+  data.waves.forEach((wave) => {
+    const waveSolutions = wave.solutions || [];
+    if (waveSolutions.length === 0) {
+      // Add wave with no solutions
+      rows.push([
+        wave.name,
+        wave.order_index?.toString() || "",
+        wave.start_estimate || "",
+        wave.end_estimate || "",
+        "",
+        "",
+        "",
+        "",
+      ]);
+    } else {
+      // Add row for each solution in the wave
+      waveSolutions.forEach((sol) => {
+        rows.push([
+          wave.name,
+          wave.order_index?.toString() || "",
+          wave.start_estimate || "",
+          wave.end_estimate || "",
+          sol.title,
+          sol.bucket,
+          sol.status,
+          sol.effort_level || "",
+        ]);
+      });
+    }
+  });
+
+  const csv = [headers, ...rows].map((row) => row.join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${data.session.name}-implementation-roadmap.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * Export Step Design Specifications to PDF
+ */
+export async function exportStepDesignSpecsPDF(sessionId: string): Promise<void> {
+  const supabase = getSupabaseClient();
+  
+  // Fetch session info
+  const { data: session } = await supabase
+    .from("sessions")
+    .select("id, name")
+    .eq("id", sessionId)
+    .single();
+
+  if (!session) throw new Error("Session not found");
+
+  // Fetch future state with nodes and step designs
+  const { data: futureStates } = await supabase
+    .from("future_states")
+    .select(`
+      *,
+      nodes:future_state_nodes(
+        *,
+        step_design_versions:step_design_versions(
+          *,
+          options:step_design_options(
+            *,
+            assumptions:design_assumptions(*)
+          )
+        )
+      )
+    `)
+    .eq("session_id", sessionId)
+    .order("version", { ascending: false })
+    .limit(1);
+
+  const latestFutureState = futureStates?.[0];
+  if (!latestFutureState) throw new Error("No future state found");
+
+  const jsPDFModule = await import("jspdf");
+  const jsPDF = jsPDFModule.default;
+  const autoTableModule = await import("jspdf-autotable");
+  const autoTable = autoTableModule.default;
+
+  const doc = new jsPDF();
+  void autoTable;
+
+  const brandGold = [255, 192, 0] as [number, number, number];
+  const brandNavy = [16, 42, 67] as [number, number, number];
+  let yPosition = 20;
+
+  // Title
+  doc.setFontSize(24);
+  doc.setTextColor(...brandNavy);
+  doc.text("Step Design Specifications", 20, yPosition);
+  yPosition += 10;
+
+  doc.setFontSize(12);
+  doc.setTextColor(100, 100, 100);
+  doc.text(`Session: ${session.name}`, 20, yPosition);
+  yPosition += 6;
+  doc.text(`Future State: ${latestFutureState.name}`, 20, yPosition);
+  yPosition += 6;
+  doc.text(`Generated: ${new Date().toLocaleDateString()}`, 20, yPosition);
+  yPosition += 15;
+
+  // Process each node with step design
+  const nodesWithDesign = (latestFutureState.nodes as Array<FutureStateNode & { 
+    step_design_versions?: Array<StepDesignVersion & { 
+      options?: Array<StepDesignOption & { assumptions?: DesignAssumption[] }> 
+    }> 
+  }>)?.filter(
+    (n) => n.step_design_status === "step_design_complete" && n.step_design_versions?.length
+  ) || [];
+
+  if (nodesWithDesign.length === 0) {
+    doc.setFontSize(12);
+    doc.text("No step designs have been completed yet.", 20, yPosition);
+  } else {
+    for (const node of nodesWithDesign) {
+      if (yPosition > 220) {
+        doc.addPage();
+        yPosition = 20;
+      }
+
+      const latestVersion = node.step_design_versions?.[0];
+      const selectedOption = latestVersion?.options?.find(
+        (o) => o.id === latestVersion.selected_option_id
+      );
+
+      if (!selectedOption) continue;
+
+      const designJson = selectedOption.design_json as {
+        purpose?: string;
+        inputs?: Array<{ name: string; description?: string }>;
+        actions?: Array<{ order: number; description: string }>;
+        outputs?: Array<{ name: string; description?: string }>;
+        controls?: Array<{ type: string; description: string }>;
+        timing?: { estimated_lead_time_minutes?: number; estimated_cycle_time_minutes?: number };
+      };
+
+      // Node header
+      doc.setFontSize(14);
+      doc.setTextColor(...brandNavy);
+      doc.text(`Step: ${node.name}`, 20, yPosition);
+      yPosition += 6;
+
+      doc.setFontSize(10);
+      doc.setTextColor(100, 100, 100);
+      doc.text(`Lane: ${node.lane} | Action: ${node.action} | Option: ${selectedOption.option_key}`, 20, yPosition);
+      yPosition += 8;
+
+      // Purpose
+      if (designJson.purpose) {
+        doc.setFontSize(11);
+        doc.setTextColor(...brandNavy);
+        doc.text("Purpose:", 20, yPosition);
+        yPosition += 5;
+        doc.setFontSize(10);
+        doc.setTextColor(60, 60, 60);
+        const purposeLines = doc.splitTextToSize(designJson.purpose, 170);
+        doc.text(purposeLines, 20, yPosition);
+        yPosition += purposeLines.length * 5 + 5;
+      }
+
+      // Inputs
+      if (designJson.inputs?.length) {
+        autoTable(doc, {
+          startY: yPosition,
+          head: [["Input", "Description"]],
+          body: designJson.inputs.map((i) => [i.name, i.description || ""]),
+          headStyles: { fillColor: brandGold, textColor: brandNavy, fontStyle: "bold", fontSize: 9 },
+          bodyStyles: { fontSize: 9 },
+          margin: { left: 20 },
+        });
+        yPosition = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 8;
+      }
+
+      // Actions
+      if (designJson.actions?.length) {
+        autoTable(doc, {
+          startY: yPosition,
+          head: [["#", "Action"]],
+          body: designJson.actions
+            .sort((a, b) => a.order - b.order)
+            .map((a) => [a.order.toString(), a.description]),
+          headStyles: { fillColor: brandGold, textColor: brandNavy, fontStyle: "bold", fontSize: 9 },
+          bodyStyles: { fontSize: 9 },
+          margin: { left: 20 },
+        });
+        yPosition = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 8;
+      }
+
+      // Outputs
+      if (designJson.outputs?.length) {
+        autoTable(doc, {
+          startY: yPosition,
+          head: [["Output", "Description"]],
+          body: designJson.outputs.map((o) => [o.name, o.description || ""]),
+          headStyles: { fillColor: brandGold, textColor: brandNavy, fontStyle: "bold", fontSize: 9 },
+          bodyStyles: { fontSize: 9 },
+          margin: { left: 20 },
+        });
+        yPosition = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 8;
+      }
+
+      // Controls
+      if (designJson.controls?.length) {
+        autoTable(doc, {
+          startY: yPosition,
+          head: [["Control Type", "Description"]],
+          body: designJson.controls.map((c) => [c.type, c.description]),
+          headStyles: { fillColor: brandGold, textColor: brandNavy, fontStyle: "bold", fontSize: 9 },
+          bodyStyles: { fontSize: 9 },
+          margin: { left: 20 },
+        });
+        yPosition = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 8;
+      }
+
+      // Assumptions
+      if (selectedOption.assumptions?.length) {
+        autoTable(doc, {
+          startY: yPosition,
+          head: [["Assumption", "Risk if Wrong", "Validation"]],
+          body: selectedOption.assumptions.map((a) => [
+            a.assumption,
+            a.risk_if_wrong || "",
+            a.validation_method || "",
+          ]),
+          headStyles: { fillColor: [255, 243, 205] as [number, number, number], textColor: brandNavy, fontStyle: "bold", fontSize: 9 },
+          bodyStyles: { fontSize: 9 },
+          margin: { left: 20 },
+        });
+        yPosition = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 8;
+      }
+
+      yPosition += 10;
+    }
+  }
+
+  // Footer
+  const pageCount = doc.getNumberOfPages();
+  for (let i = 1; i <= pageCount; i++) {
+    doc.setPage(i);
+    doc.setFontSize(9);
+    doc.setTextColor(150, 150, 150);
+    doc.text(
+      `Page ${i} of ${pageCount} | Step Design Specs | ${new Date().toLocaleDateString()}`,
+      doc.internal.pageSize.getWidth() / 2,
+      doc.internal.pageSize.getHeight() - 10,
+      { align: "center" }
+    );
+  }
+
+  doc.save(`${session.name}-step-design-specs.pdf`);
+}
+
+/**
+ * Export Traceability Matrix (Solution → Node → Step Design → Assumptions)
+ */
+export async function exportTraceabilityMatrix(sessionId: string): Promise<void> {
+  const supabase = getSupabaseClient();
+  
+  // Fetch session info
+  const { data: session } = await supabase
+    .from("sessions")
+    .select("id, name")
+    .eq("id", sessionId)
+    .single();
+
+  if (!session) throw new Error("Session not found");
+
+  // Fetch solutions
+  const { data: solutions } = await supabase
+    .from("solution_cards")
+    .select("id, title, bucket, status")
+    .eq("session_id", sessionId)
+    .eq("status", "accepted");
+
+  // Fetch future state with nodes and step designs
+  const { data: futureStates } = await supabase
+    .from("future_states")
+    .select(`
+      *,
+      nodes:future_state_nodes(
+        *,
+        step_design_versions:step_design_versions(
+          *,
+          options:step_design_options(
+            *,
+            assumptions:design_assumptions(*)
+          )
+        )
+      )
+    `)
+    .eq("session_id", sessionId)
+    .order("version", { ascending: false })
+    .limit(1);
+
+  const latestFutureState = futureStates?.[0];
+
+  const headers = [
+    "Solution",
+    "Solution Type",
+    "Node",
+    "Node Lane",
+    "Node Action",
+    "Step Design Option",
+    "Design Status",
+    "Confidence",
+    "Assumption",
+    "Risk if Wrong",
+    "Validation Method",
+    "Validated",
+  ];
+
+  const rows: string[][] = [];
+
+  // Create traceability rows
+  (solutions || []).forEach((solution: { id: string; title: string; bucket: string; status: string }) => {
+    // Find nodes linked to this solution
+    const linkedNodes = (latestFutureState?.nodes as Array<FutureStateNode & { 
+      step_design_versions?: Array<StepDesignVersion & { 
+        options?: Array<StepDesignOption & { assumptions?: DesignAssumption[] }> 
+      }> 
+    }> || []).filter(
+      (n) => n.linked_solution_id === solution.id
+    );
+
+    if (linkedNodes.length === 0) {
+      rows.push([
+        solution.title,
+        solution.bucket,
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+      ]);
+    } else {
+      linkedNodes.forEach((node) => {
+        const latestVersion = node.step_design_versions?.[0];
+        const selectedOption = latestVersion?.options?.find(
+          (o) => o.id === latestVersion.selected_option_id
+        );
+
+        if (!selectedOption) {
+          rows.push([
+            solution.title,
+            solution.bucket,
+            node.name,
+            node.lane,
+            node.action,
+            "",
+            node.step_design_status || "strategy_only",
+            "",
+            "",
+            "",
+            "",
+            "",
+          ]);
+        } else {
+          const assumptions = selectedOption.assumptions || [];
+          if (assumptions.length === 0) {
+            rows.push([
+              solution.title,
+              solution.bucket,
+              node.name,
+              node.lane,
+              node.action,
+              selectedOption.title,
+              node.step_design_status || "step_design_complete",
+              `${Math.round(selectedOption.confidence * 100)}%`,
+              "",
+              "",
+              "",
+              "",
+            ]);
+          } else {
+            assumptions.forEach((assumption, idx) => {
+              rows.push([
+                idx === 0 ? solution.title : "",
+                idx === 0 ? solution.bucket : "",
+                idx === 0 ? node.name : "",
+                idx === 0 ? node.lane : "",
+                idx === 0 ? node.action : "",
+                idx === 0 ? selectedOption.title : "",
+                idx === 0 ? (node.step_design_status || "step_design_complete") : "",
+                idx === 0 ? `${Math.round(selectedOption.confidence * 100)}%` : "",
+                assumption.assumption,
+                assumption.risk_if_wrong || "",
+                assumption.validation_method || "",
+                assumption.validated ? "Yes" : "No",
+              ]);
+            });
+          }
+        }
+      });
+    }
+  });
+
+  const csv = [headers, ...rows].map((row) => row.join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${session.name}-traceability-matrix.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * Export Implementation Notes per Step (CSV)
+ */
+export async function exportImplementationNotes(sessionId: string): Promise<void> {
+  const supabase = getSupabaseClient();
+  
+  // Fetch session info
+  const { data: session } = await supabase
+    .from("sessions")
+    .select("id, name")
+    .eq("id", sessionId)
+    .single();
+
+  if (!session) throw new Error("Session not found");
+
+  // Fetch future state with nodes, step designs, and context
+  const { data: futureStates } = await supabase
+    .from("future_states")
+    .select(`
+      *,
+      nodes:future_state_nodes(
+        *,
+        step_context:step_context(*),
+        step_design_versions:step_design_versions(
+          *,
+          options:step_design_options(*)
+        )
+      )
+    `)
+    .eq("session_id", sessionId)
+    .order("version", { ascending: false })
+    .limit(1);
+
+  const latestFutureState = futureStates?.[0];
+  if (!latestFutureState) throw new Error("No future state found");
+
+  const headers = [
+    "Step Name",
+    "Lane",
+    "Action",
+    "Design Status",
+    "Purpose",
+    "Changes from Current",
+    "Lead Time (min)",
+    "Cycle Time (min)",
+    "Risks",
+    "Dependencies",
+    "Context Notes",
+  ];
+
+  const rows: string[][] = [];
+
+  ((latestFutureState.nodes as Array<FutureStateNode & { 
+    step_context?: Array<{ notes?: string; context_json?: { purpose?: string } }>;
+    step_design_versions?: Array<StepDesignVersion & { options?: StepDesignOption[] }> 
+  }>) || []).forEach((node) => {
+    const latestVersion = node.step_design_versions?.[0];
+    const selectedOption = latestVersion?.options?.find(
+      (o) => o.id === latestVersion.selected_option_id
+    );
+    const context = node.step_context?.[0];
+    const designJson = selectedOption?.design_json as { 
+      purpose?: string; 
+      timing?: { estimated_lead_time_minutes?: number; estimated_cycle_time_minutes?: number } 
+    } | undefined;
+
+    rows.push([
+      node.name,
+      node.lane,
+      node.action,
+      node.step_design_status || "strategy_only",
+      designJson?.purpose || context?.context_json?.purpose || "",
+      selectedOption?.changes || "",
+      designJson?.timing?.estimated_lead_time_minutes?.toString() || node.lead_time_minutes?.toString() || "",
+      designJson?.timing?.estimated_cycle_time_minutes?.toString() || node.cycle_time_minutes?.toString() || "",
+      (selectedOption?.risks || []).join("; ").replace(/,/g, ";"),
+      (selectedOption?.dependencies || []).join("; ").replace(/,/g, ";"),
+      (context?.notes || "").replace(/,/g, ";").replace(/\n/g, " "),
+    ]);
+  });
+
+  const csv = [headers, ...rows].map((row) => row.join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${session.name}-implementation-notes.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * Export complete Future State Studio package
+ */
+export async function exportFutureStateStudioPackage(
+  sessionId: string,
+  sections: FutureStateExportSections
+): Promise<void> {
+  const exports: Promise<void>[] = [];
+
+  if (sections.executiveSummary) {
+    exports.push(exportFutureStateSummaryPDF(sessionId));
+  }
+
+  if (sections.solutionRegister) {
+    exports.push(exportSolutionRegister(sessionId));
+  }
+
+  if (sections.roadmap) {
+    exports.push(exportRoadmapCSV(sessionId));
+  }
+
+  if (sections.stepDesignSpecs) {
+    exports.push(exportStepDesignSpecsPDF(sessionId));
+  }
+
+  if (sections.traceabilityMatrix) {
+    exports.push(exportTraceabilityMatrix(sessionId));
+  }
+
+  if (sections.implementationNotes) {
+    exports.push(exportImplementationNotes(sessionId));
+  }
+
+  // Execute all exports
+  await Promise.all(exports);
 }

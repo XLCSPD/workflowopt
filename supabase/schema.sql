@@ -200,6 +200,69 @@ CREATE TABLE user_notification_preferences (
 );
 
 -- ============================================
+-- WORKFLOW CONTEXT TABLES
+-- ============================================
+
+-- Workflow Context (structured overview for AI agents)
+CREATE TABLE workflow_contexts (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    process_id UUID REFERENCES processes(id) ON DELETE CASCADE UNIQUE,
+    -- Core descriptors
+    purpose TEXT,
+    business_value TEXT,
+    trigger_events TEXT[] DEFAULT '{}',
+    end_outcomes TEXT[] DEFAULT '{}',
+    -- Operational context
+    volume_frequency TEXT,
+    sla_targets TEXT,
+    compliance_requirements TEXT[] DEFAULT '{}',
+    -- Pain points
+    known_pain_points TEXT[] DEFAULT '{}',
+    previous_improvement_attempts TEXT[] DEFAULT '{}',
+    -- Constraints and assumptions
+    constraints TEXT[] DEFAULT '{}',
+    assumptions TEXT[] DEFAULT '{}',
+    -- Metadata
+    created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    updated_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Workflow Stakeholders (one-to-many from workflow_contexts)
+CREATE TABLE workflow_stakeholders (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    context_id UUID REFERENCES workflow_contexts(id) ON DELETE CASCADE,
+    role TEXT NOT NULL,
+    responsibilities TEXT,
+    pain_points TEXT,
+    order_index INTEGER DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Workflow Systems (one-to-many from workflow_contexts)
+CREATE TABLE workflow_systems (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    context_id UUID REFERENCES workflow_contexts(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    role TEXT,
+    integration_notes TEXT,
+    order_index INTEGER DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Workflow Metrics (one-to-many from workflow_contexts)
+CREATE TABLE workflow_metrics (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    context_id UUID REFERENCES workflow_contexts(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    current_value TEXT,
+    target_value TEXT,
+    order_index INTEGER DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================
 -- INDEXES
 -- ============================================
 
@@ -222,6 +285,12 @@ CREATE INDEX idx_notifications_created ON notifications(created_at DESC);
 CREATE INDEX idx_session_insights_session ON session_insights(session_id);
 CREATE INDEX idx_user_notification_preferences_user ON user_notification_preferences(user_id);
 
+-- Workflow Context indexes
+CREATE INDEX idx_workflow_contexts_process ON workflow_contexts(process_id);
+CREATE INDEX idx_workflow_stakeholders_context ON workflow_stakeholders(context_id);
+CREATE INDEX idx_workflow_systems_context ON workflow_systems(context_id);
+CREATE INDEX idx_workflow_metrics_context ON workflow_metrics(context_id);
+
 -- ============================================
 -- ROW LEVEL SECURITY POLICIES
 -- ============================================
@@ -242,6 +311,10 @@ ALTER TABLE training_progress ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE session_insights ENABLE ROW LEVEL SECURITY;
 ALTER TABLE user_notification_preferences ENABLE ROW LEVEL SECURITY;
+ALTER TABLE workflow_contexts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE workflow_stakeholders ENABLE ROW LEVEL SECURITY;
+ALTER TABLE workflow_systems ENABLE ROW LEVEL SECURITY;
+ALTER TABLE workflow_metrics ENABLE ROW LEVEL SECURITY;
 
 -- ============================================
 -- HELPER FUNCTIONS (SECURITY DEFINER to avoid RLS recursion)
@@ -266,8 +339,32 @@ CREATE POLICY "Users can view own org" ON organizations
     FOR SELECT USING (id = get_user_org_id());
 
 -- Users
-CREATE POLICY "Users can view own profile" ON users
-    FOR SELECT USING (id = auth.uid() OR org_id = get_user_org_id());
+-- Allow reading user profiles for:
+-- - yourself
+-- - people in your org
+-- - people who share a session with you (as participant or facilitator)
+--
+-- This is important for showing author names on observations/comments where the UI joins
+-- `observations.user_id -> users`.
+CREATE POLICY "Users can view profiles for accessible sessions" ON users
+    FOR SELECT USING (
+      id = auth.uid()
+      OR org_id = get_user_org_id()
+      OR id IN (
+        SELECT sp.user_id
+        FROM public.session_participants sp
+        JOIN public.sessions s ON s.id = sp.session_id
+        WHERE
+          -- If you're the facilitator you can see all participants for that session
+          s.facilitator_id = auth.uid()
+          -- If you're a participant you can see other participants in your sessions
+          OR sp.session_id IN (
+            SELECT session_id
+            FROM public.session_participants
+            WHERE user_id = auth.uid()
+          )
+      )
+    );
 
 CREATE POLICY "Users can update own profile" ON users
     FOR UPDATE USING (id = auth.uid());
@@ -418,6 +515,103 @@ CREATE POLICY "Users can view own notification preferences" ON user_notification
 CREATE POLICY "Users can manage own notification preferences" ON user_notification_preferences
     FOR ALL USING (user_id = auth.uid());
 
+-- Workflow Contexts
+CREATE POLICY "Users can view workflow contexts for accessible processes" ON workflow_contexts
+    FOR SELECT USING (
+        process_id IN (
+            SELECT id FROM processes 
+            WHERE org_id IS NULL OR org_id = get_user_org_id()
+        )
+    );
+
+CREATE POLICY "Users can create workflow contexts" ON workflow_contexts
+    FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
+
+CREATE POLICY "Users can update workflow contexts" ON workflow_contexts
+    FOR UPDATE USING (
+        process_id IN (
+            SELECT id FROM processes 
+            WHERE created_by = auth.uid() OR get_user_role() IN ('admin', 'facilitator')
+        )
+    );
+
+CREATE POLICY "Users can delete workflow contexts" ON workflow_contexts
+    FOR DELETE USING (
+        process_id IN (
+            SELECT id FROM processes 
+            WHERE created_by = auth.uid() OR get_user_role() IN ('admin', 'facilitator')
+        )
+    );
+
+-- Workflow Stakeholders
+CREATE POLICY "Users can view workflow stakeholders" ON workflow_stakeholders
+    FOR SELECT USING (
+        context_id IN (
+            SELECT id FROM workflow_contexts 
+            WHERE process_id IN (
+                SELECT id FROM processes 
+                WHERE org_id IS NULL OR org_id = get_user_org_id()
+            )
+        )
+    );
+
+CREATE POLICY "Users can manage workflow stakeholders" ON workflow_stakeholders
+    FOR ALL USING (
+        context_id IN (
+            SELECT id FROM workflow_contexts 
+            WHERE process_id IN (
+                SELECT id FROM processes 
+                WHERE created_by = auth.uid() OR get_user_role() IN ('admin', 'facilitator')
+            )
+        )
+    );
+
+-- Workflow Systems
+CREATE POLICY "Users can view workflow systems" ON workflow_systems
+    FOR SELECT USING (
+        context_id IN (
+            SELECT id FROM workflow_contexts 
+            WHERE process_id IN (
+                SELECT id FROM processes 
+                WHERE org_id IS NULL OR org_id = get_user_org_id()
+            )
+        )
+    );
+
+CREATE POLICY "Users can manage workflow systems" ON workflow_systems
+    FOR ALL USING (
+        context_id IN (
+            SELECT id FROM workflow_contexts 
+            WHERE process_id IN (
+                SELECT id FROM processes 
+                WHERE created_by = auth.uid() OR get_user_role() IN ('admin', 'facilitator')
+            )
+        )
+    );
+
+-- Workflow Metrics
+CREATE POLICY "Users can view workflow metrics" ON workflow_metrics
+    FOR SELECT USING (
+        context_id IN (
+            SELECT id FROM workflow_contexts 
+            WHERE process_id IN (
+                SELECT id FROM processes 
+                WHERE org_id IS NULL OR org_id = get_user_org_id()
+            )
+        )
+    );
+
+CREATE POLICY "Users can manage workflow metrics" ON workflow_metrics
+    FOR ALL USING (
+        context_id IN (
+            SELECT id FROM workflow_contexts 
+            WHERE process_id IN (
+                SELECT id FROM processes 
+                WHERE created_by = auth.uid() OR get_user_role() IN ('admin', 'facilitator')
+            )
+        )
+    );
+
 -- ============================================
 -- FUNCTIONS
 -- ============================================
@@ -493,6 +687,10 @@ CREATE TRIGGER update_training_progress_updated_at
 
 CREATE TRIGGER update_user_notification_preferences_updated_at
     BEFORE UPDATE ON user_notification_preferences
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE TRIGGER update_workflow_contexts_updated_at
+    BEFORE UPDATE ON workflow_contexts
     FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
 -- ============================================

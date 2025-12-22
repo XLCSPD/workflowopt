@@ -144,6 +144,13 @@ export async function archiveSession(id: string) {
   return updateSession(id, { status: "archived" });
 }
 
+export async function reopenSession(id: string) {
+  return updateSession(id, {
+    status: "active",
+    ended_at: undefined,  // Clear the ended_at timestamp
+  });
+}
+
 export async function deleteSession(id: string) {
   const { error } = await supabase
     .from("sessions")

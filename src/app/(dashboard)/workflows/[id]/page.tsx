@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useMemo, useState, useCallback, useEffect, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { Header } from "@/components/layout/Header";
@@ -45,10 +45,13 @@ import {
   Share2,
   Loader2,
   Plus,
+  Redo2,
   Save,
   Trash2,
+  Undo2,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useUndoRedo } from "@/hooks/useUndoRedo";
 import { getWorkflowWithDetails } from "@/lib/services/workflows";
 import { exportWorkflowToPDF } from "@/lib/services/export";
 import type { ReactFlowInstance } from "reactflow";
@@ -58,16 +61,34 @@ import {
   deleteStep,
   createConnection,
   deleteConnection,
-  getDefaultLanes,
+  createLane,
+  deleteLane,
+  deleteLaneMoveSteps,
+  ensureDefaultProcessLanes,
+  getProcessLanes,
+  renameLane,
+  reorderLanes,
+  updateLaneColor,
   deleteProcess,
 } from "@/lib/services/workflowEditor";
-import type { Process, ProcessStep, StepType } from "@/types";
+import type { Process, ProcessLane, ProcessStep, StepType } from "@/types";
 import type { StepConnection } from "@/lib/services/workflows";
+import { StepToolbox } from "@/components/workflow/StepToolbox";
+import { SwimlaneManager } from "@/components/workflow/SwimlaneManager";
+import {
+  WorkflowContextDrawer,
+  ContextTriggerButton,
+} from "@/components/workflow/WorkflowContextDrawer";
 
 interface ConnectionData {
   id?: string;
   source: string;
   target: string;
+}
+
+interface WorkflowSnapshot {
+  steps: ProcessStep[];
+  connections: ConnectionData[];
 }
 
 export default function WorkflowDetailPage() {
@@ -84,6 +105,16 @@ export default function WorkflowDetailPage() {
   const [observations] = useState<
     Record<string, { count: number; priorityScore: number }>
   >({});
+
+  // Keep connectionIds consistent with the current connections state.
+  useEffect(() => {
+    const map: Record<string, string> = {};
+    connections.forEach((c) => {
+      if (!c.id) return;
+      map[`${c.source}-${c.target}`] = c.id;
+    });
+    setConnectionIds(map);
+  }, [connections]);
 
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
   const [showHeatmap, setShowHeatmap] = useState(false);
@@ -103,23 +134,70 @@ export default function WorkflowDetailPage() {
     cycle_time_minutes: "" as string,
   });
   const [isSaving, setIsSaving] = useState(false);
-  const [customLanes, setCustomLanes] = useState<string[]>(getDefaultLanes());
+  const [lanes, setLanes] = useState<ProcessLane[]>([]);
+  const [isSwimlaneManagerOpen, setIsSwimlaneManagerOpen] = useState(false);
+  
+  // Context drawer state
+  const [isContextDrawerOpen, setIsContextDrawerOpen] = useState(false);
+  const [contextCompleteness, setContextCompleteness] = useState(0);
+  const laneNames = useMemo(() => lanes.map((l) => l.name), [lanes]);
+
+  const laneStyles = useMemo(() => {
+    const map: Record<string, { bg: string; border: string }> = {};
+    lanes.forEach((l) => {
+      if (l.bg_color && l.border_color) {
+        map[l.name] = { bg: l.bg_color, border: l.border_color };
+      }
+    });
+    return map;
+  }, [lanes]);
   const [newLaneName, setNewLaneName] = useState("");
   const [isAddingNewLane, setIsAddingNewLane] = useState(false);
+  const [inlineEditingStepId, setInlineEditingStepId] = useState<string | null>(null);
 
   const selectedStep = steps.find((s) => s.id === selectedStepId) || null;
 
-  // Handle adding a new custom swimlane
-  const handleAddNewLane = () => {
-    const trimmedName = newLaneName.trim();
-    if (trimmedName && !customLanes.includes(trimmedName)) {
-      setCustomLanes((prev) => [...prev, trimmedName]);
-      setStepForm({ ...stepForm, lane: trimmedName });
-      toast({ title: `Swimlane "${trimmedName}" added` });
+  const {
+    canUndo,
+    canRedo,
+    undo,
+    redo,
+    pushSnapshot,
+    pushUndoSnapshot,
+    pushRedoSnapshot,
+    clear: clearHistory,
+  } = useUndoRedo<WorkflowSnapshot>({ limit: 50 });
+  const currentSnapshot = useMemo<WorkflowSnapshot>(() => ({ steps, connections }), [steps, connections]);
+
+  const cloneSnapshot = useCallback((snap: WorkflowSnapshot): WorkflowSnapshot => {
+    // Steps/connections are plain JSON-ish data from Supabase; JSON clone is fine and stable.
+    return JSON.parse(JSON.stringify(snap)) as WorkflowSnapshot;
+  }, []);
+
+  const handleAddNewLane = useCallback(async () => {
+    if (!workflow) return;
+    const trimmed = newLaneName.trim();
+    if (!trimmed) return;
+    if (laneNames.includes(trimmed)) {
+      toast({ variant: "destructive", title: "Lane already exists" });
+      return;
     }
-    setNewLaneName("");
-    setIsAddingNewLane(false);
-  };
+
+    setIsSaving(true);
+    try {
+      const created = await createLane(workflow.id, trimmed);
+      setLanes((prev) => [...prev, created].sort((a, b) => a.order_index - b.order_index));
+      setStepForm((prev) => ({ ...prev, lane: created.name }));
+      toast({ title: `Swimlane "${created.name}" added` });
+      setNewLaneName("");
+      setIsAddingNewLane(false);
+    } catch (error) {
+      console.error("Failed to add swimlane:", error);
+      toast({ variant: "destructive", title: "Error", description: "Failed to add swimlane." });
+    } finally {
+      setIsSaving(false);
+    }
+  }, [workflow, newLaneName, laneNames, toast]);
 
   // Fetch workflow data
   useEffect(() => {
@@ -132,6 +210,7 @@ export default function WorkflowDetailPage() {
           process,
           steps: workflowSteps,
           connections: workflowConnections,
+          lanes: workflowLanes,
         } = await getWorkflowWithDetails(workflowId);
 
         setWorkflow(process);
@@ -153,11 +232,27 @@ export default function WorkflowDetailPage() {
           }))
         );
 
-        // Extract unique lanes from steps
-        const lanes = new Set(workflowSteps.map((s: ProcessStep) => s.lane));
-        if (lanes.size > 0) {
-          setCustomLanes(Array.from(lanes));
+        // Load or initialize persisted lanes (DB-backed order)
+        let resolvedLanes: ProcessLane[] = workflowLanes || [];
+        if (resolvedLanes.length === 0) {
+          resolvedLanes = await ensureDefaultProcessLanes(workflowId);
         }
+        setLanes(resolvedLanes);
+
+        // Keep step form lane valid
+        setStepForm((prev) => ({
+          ...prev,
+          lane: resolvedLanes[0]?.name ?? prev.lane ?? "Requester",
+        }));
+
+        // Reset UI/editor state on (re)load
+        setSelectedStepId(null);
+        setIsPanelOpen(false);
+        setInlineEditingStepId(null);
+        setIsEditStepDialogOpen(false);
+        setIsAddStepDialogOpen(false);
+        setEditingStep(null);
+        clearHistory();
       } catch (error) {
         console.error("Failed to load workflow:", error);
         toast({
@@ -172,7 +267,27 @@ export default function WorkflowDetailPage() {
     };
 
     loadWorkflow();
-  }, [params.id, router, toast]);
+  }, [params.id, router, toast, clearHistory]);
+
+  // Fetch context completeness
+  useEffect(() => {
+    const fetchContextCompleteness = async () => {
+      const workflowId = params.id as string;
+      if (!workflowId) return;
+      
+      try {
+        const response = await fetch(`/api/workflows/${workflowId}/context`);
+        if (response.ok) {
+          const data = await response.json();
+          setContextCompleteness(data.completeness?.overallScore || 0);
+        }
+      } catch (error) {
+        console.error("Failed to fetch context completeness:", error);
+      }
+    };
+
+    fetchContextCompleteness();
+  }, [params.id]);
 
   const handleStepClick = useCallback(
     (stepId: string) => {
@@ -180,6 +295,8 @@ export default function WorkflowDetailPage() {
         // In edit mode, open edit dialog
         const step = steps.find((s) => s.id === stepId);
         if (step) {
+          setSelectedStepId(stepId);
+          setInlineEditingStepId(null);
           setEditingStep(step);
           setStepForm({
             name: step.step_name,
@@ -199,10 +316,433 @@ export default function WorkflowDetailPage() {
     [isEditMode, steps]
   );
 
+  const handleSelectStep = useCallback((stepId: string | null) => {
+    setSelectedStepId(stepId);
+  }, []);
+
+  const handleCreateStepFromToolbox = useCallback(
+    async (input: { type: ProcessStep["step_type"]; lane: string; position: { x: number; y: number } }) => {
+      if (!workflow) return;
+      if (isSaving) return;
+
+      pushSnapshot(cloneSnapshot(currentSnapshot));
+
+      setIsSaving(true);
+      try {
+        const label = input.type.charAt(0).toUpperCase() + input.type.slice(1);
+        const newStep = await createStep({
+          id: crypto.randomUUID(),
+          process_id: workflow.id,
+          name: `New ${label}`,
+          type: input.type as StepType,
+          lane: input.lane,
+          order_index: steps.length,
+          position_x: input.position.x,
+          position_y: input.position.y,
+        });
+
+        setSteps((prev) => [...prev, newStep]);
+        setSelectedStepId(newStep.id);
+        setInlineEditingStepId(newStep.id);
+      } catch (error) {
+        console.error("Failed to create step from toolbox:", error);
+        toast({ variant: "destructive", title: "Error", description: "Failed to add step." });
+      } finally {
+        setIsSaving(false);
+      }
+    },
+    [workflow, isSaving, pushSnapshot, cloneSnapshot, currentSnapshot, steps.length, toast]
+  );
+
+  const handleReorderLanes = useCallback(
+    async (orderedLaneIds: string[]) => {
+      if (!workflow) return;
+      const next = orderedLaneIds
+        .map((id, index) => {
+          const lane = lanes.find((l) => l.id === id);
+          return lane ? { ...lane, order_index: index } : null;
+        })
+        .filter(Boolean) as ProcessLane[];
+
+      setLanes(next);
+      try {
+        await reorderLanes(workflow.id, orderedLaneIds);
+      } catch (error) {
+        console.error("Failed to reorder lanes:", error);
+        toast({ variant: "destructive", title: "Error", description: "Failed to reorder lanes." });
+        // Reload from DB to recover
+        const refreshed = await getProcessLanes(workflow.id);
+        setLanes(refreshed);
+      }
+    },
+    [workflow, lanes, toast]
+  );
+
+  const handleRenameLane = useCallback(
+    async (_laneId: string, oldName: string, newName: string) => {
+      if (!workflow) return;
+      const trimmed = newName.trim();
+      if (!trimmed) return;
+      if (laneNames.includes(trimmed)) {
+        toast({ variant: "destructive", title: "Lane already exists" });
+        return;
+      }
+
+      setIsSaving(true);
+      try {
+        await renameLane(workflow.id, oldName, trimmed);
+        setLanes((prev) =>
+          prev.map((l) => (l.name === oldName ? { ...l, name: trimmed } : l))
+        );
+        setSteps((prev) => prev.map((s) => (s.lane === oldName ? { ...s, lane: trimmed } : s)));
+        setStepForm((prev) => ({ ...prev, lane: prev.lane === oldName ? trimmed : prev.lane }));
+        toast({ title: "Swimlane renamed" });
+      } catch (error) {
+        console.error("Failed to rename lane:", error);
+        toast({ variant: "destructive", title: "Error", description: "Failed to rename lane." });
+      } finally {
+        setIsSaving(false);
+      }
+    },
+    [workflow, laneNames, toast]
+  );
+
+  const handleDeleteLane = useCallback(
+    async (laneId: string) => {
+      if (!workflow) return;
+      const lane = lanes.find((l) => l.id === laneId);
+      if (!lane) return;
+      const stepCount = steps.filter((s) => s.lane === lane.name).length;
+      if (stepCount > 0) {
+        toast({ variant: "destructive", title: "Lane not empty", description: "Move or delete steps first." });
+        return;
+      }
+
+      setIsSaving(true);
+      try {
+        await deleteLane(workflow.id, laneId);
+        setLanes((prev) => prev.filter((l) => l.id !== laneId));
+        setStepForm((prev) => ({ ...prev, lane: laneNames[0] || "Requester" }));
+        toast({ title: "Swimlane deleted" });
+      } catch (error) {
+        console.error("Failed to delete lane:", error);
+        toast({ variant: "destructive", title: "Error", description: "Failed to delete lane." });
+      } finally {
+        setIsSaving(false);
+      }
+    },
+    [workflow, lanes, steps, laneNames, toast]
+  );
+
+  const handleDeleteLaneMoveSteps = useCallback(
+    async (laneId: string, destinationLaneId: string) => {
+      if (!workflow) return;
+      if (isSaving) return;
+
+      const lane = lanes.find((l) => l.id === laneId);
+      const dest = lanes.find((l) => l.id === destinationLaneId);
+      if (!lane || !dest) return;
+
+      setIsSaving(true);
+      try {
+        await deleteLaneMoveSteps(workflow.id, laneId, destinationLaneId);
+
+        // Update local steps to reflect the server-side move.
+        setSteps((prev) => prev.map((s) => (s.lane === lane.name ? { ...s, lane: dest.name } : s)));
+
+        // Refresh lanes (order_index may have been normalized server-side)
+        const refreshed = await getProcessLanes(workflow.id);
+        setLanes(refreshed);
+
+        // Keep forms pointing to a valid lane name
+        setStepForm((prev) => ({ ...prev, lane: prev.lane === lane.name ? dest.name : prev.lane }));
+
+        toast({ title: "Swimlane deleted", description: `Moved steps to “${dest.name}”.` });
+      } catch (error) {
+        console.error("Failed to delete lane (move steps):", error);
+        toast({ variant: "destructive", title: "Error", description: "Failed to delete lane." });
+      } finally {
+        setIsSaving(false);
+      }
+    },
+    [workflow, isSaving, lanes, toast]
+  );
+
+  const handleUpdateLaneColor = useCallback(
+    async (laneId: string, colors: { bg_color: string | null; border_color: string | null }) => {
+      if (!workflow) return;
+      if (isSaving) return;
+
+      setIsSaving(true);
+      try {
+        const updated = await updateLaneColor(workflow.id, laneId, colors);
+        setLanes((prev) => prev.map((l) => (l.id === updated.id ? updated : l)));
+      } catch (error) {
+        console.error("Failed to update lane color:", error);
+        toast({ variant: "destructive", title: "Error", description: "Failed to update lane color." });
+      } finally {
+        setIsSaving(false);
+      }
+    },
+    [workflow, isSaving, toast]
+  );
+
   const handleClosePanel = useCallback(() => {
     setIsPanelOpen(false);
     setSelectedStepId(null);
   }, []);
+
+  const applySnapshot = useCallback(
+    async (snap: WorkflowSnapshot) => {
+      if (!workflow) return;
+
+      setInlineEditingStepId(null);
+      setIsEditStepDialogOpen(false);
+      setIsAddStepDialogOpen(false);
+      setEditingStep(null);
+
+      setIsSaving(true);
+      try {
+        const currentById = new Map<string, ProcessStep>(steps.map((s) => [s.id, s]));
+        const targetById = new Map<string, ProcessStep>(snap.steps.map((s) => [s.id, s]));
+
+        // 1) Delete steps not in target (connections will cascade)
+        for (const id of Array.from(currentById.keys())) {
+          if (!targetById.has(id)) {
+            await deleteStep(id);
+          }
+        }
+
+        // 2) Upsert steps to match target
+        for (const [id, target] of Array.from(targetById.entries())) {
+          const exists = currentById.has(id);
+
+          if (!exists) {
+            await createStep({
+              id,
+              process_id: workflow.id,
+              name: target.step_name,
+              description: target.description ?? undefined,
+              type: target.step_type,
+              lane: target.lane,
+              order_index: target.order_index,
+              lead_time_minutes: target.lead_time_minutes ?? null,
+              cycle_time_minutes: target.cycle_time_minutes ?? null,
+              position_x: target.position_x,
+              position_y: target.position_y,
+            });
+          } else {
+            await updateStep(id, {
+              name: target.step_name,
+              description: target.description ?? undefined,
+              type: target.step_type,
+              lane: target.lane,
+              order_index: target.order_index,
+              lead_time_minutes: target.lead_time_minutes ?? null,
+              cycle_time_minutes: target.cycle_time_minutes ?? null,
+              position_x: target.position_x,
+              position_y: target.position_y,
+            });
+          }
+        }
+
+        // 3) Normalize target connections to always have an id
+        const normalizedTargetConnections: ConnectionData[] = snap.connections.map((c) => ({
+          ...c,
+          id: c.id ?? crypto.randomUUID(),
+        }));
+
+        const currentConnIds = new Set<string>(
+          connections.map((c) => c.id).filter((id): id is string => typeof id === "string")
+        );
+        const targetConnIds = new Set<string>(
+          normalizedTargetConnections.map((c) => c.id).filter((id): id is string => typeof id === "string")
+        );
+
+        // 4) Delete connections not in target
+        for (const c of connections) {
+          if (!c.id) continue;
+          if (!targetConnIds.has(c.id)) {
+            await deleteConnection(c.id);
+          }
+        }
+
+        // 5) Create connections missing from current
+        for (const c of normalizedTargetConnections) {
+          if (!c.id) continue;
+          if (currentConnIds.has(c.id)) continue;
+          await createConnection(workflow.id, c.source, c.target, undefined, c.id);
+        }
+
+        // 6) Apply state
+        setSteps(snap.steps);
+        setConnections(normalizedTargetConnections);
+        setSelectedStepId(null);
+      } catch (error) {
+        console.error("Failed to apply snapshot:", error);
+        toast({
+          variant: "destructive",
+          title: "Undo/Redo failed",
+          description: "Could not apply workflow change. Please try again.",
+        });
+      } finally {
+        setIsSaving(false);
+      }
+    },
+    [workflow, steps, connections, toast]
+  );
+
+  const handleUndo = useCallback(async () => {
+    if (!isEditMode) return;
+    if (!canUndo) return;
+    if (isSaving) return;
+
+    const prev = undo();
+    if (!prev) return;
+    pushRedoSnapshot(cloneSnapshot(currentSnapshot));
+    await applySnapshot(prev);
+  }, [applySnapshot, canUndo, cloneSnapshot, currentSnapshot, isEditMode, isSaving, pushRedoSnapshot, undo]);
+
+  const handleRedo = useCallback(async () => {
+    if (!isEditMode) return;
+    if (!canRedo) return;
+    if (isSaving) return;
+
+    const next = redo();
+    if (!next) return;
+    pushUndoSnapshot(cloneSnapshot(currentSnapshot));
+    await applySnapshot(next);
+  }, [applySnapshot, canRedo, cloneSnapshot, currentSnapshot, isEditMode, isSaving, pushUndoSnapshot, redo]);
+
+  // Cmd/Ctrl+Z and Cmd/Ctrl+Shift+Z
+  useEffect(() => {
+    if (!isEditMode) return;
+
+    const handler = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      const tag = el?.tagName?.toLowerCase();
+      if (tag === "input" || tag === "textarea" || el?.isContentEditable) return;
+
+      const isMacUndo = (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z";
+      if (!isMacUndo) return;
+
+      e.preventDefault();
+      if (e.shiftKey) {
+        void handleRedo();
+      } else {
+        void handleUndo();
+      }
+    };
+
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [handleRedo, handleUndo, isEditMode]);
+
+  const handleQuickAddStep = useCallback(
+    async (lane: string, position: { x: number; y: number }) => {
+      if (!workflow) return;
+      if (isSaving) return;
+
+      pushSnapshot(cloneSnapshot(currentSnapshot));
+
+      setIsSaving(true);
+      try {
+        const newStep = await createStep({
+          id: crypto.randomUUID(),
+          process_id: workflow.id,
+          name: "New Step",
+          description: undefined,
+          type: "action",
+          lane,
+          order_index: steps.length,
+          position_x: position.x,
+          position_y: position.y,
+        });
+
+        setSteps((prev) => [...prev, newStep]);
+        setSelectedStepId(newStep.id);
+        setInlineEditingStepId(newStep.id);
+      } catch (error) {
+        console.error("Failed to quick-add step:", error);
+        toast({
+          variant: "destructive",
+          title: "Error",
+          description: "Failed to add step.",
+        });
+      } finally {
+        setIsSaving(false);
+      }
+    },
+    [workflow, isSaving, pushSnapshot, cloneSnapshot, currentSnapshot, steps.length, toast]
+  );
+
+  const handleStartInlineEditStep = useCallback((stepId: string) => {
+    setSelectedStepId(stepId);
+    setInlineEditingStepId(stepId);
+  }, []);
+
+  const handleCancelInlineEditStep = useCallback((stepId: string) => {
+    if (inlineEditingStepId === stepId) setInlineEditingStepId(null);
+  }, [inlineEditingStepId]);
+
+  const handleInlineEditStep = useCallback(
+    async (stepId: string, newName: string) => {
+      const trimmed = newName.trim();
+
+      // If user clears the name, treat it as a delete (common quick-edit behavior).
+      if (!trimmed) {
+        pushSnapshot(cloneSnapshot(currentSnapshot));
+
+        setInlineEditingStepId(null);
+        setIsSaving(true);
+        try {
+          await deleteStep(stepId);
+          setSteps((prev) => prev.filter((s) => s.id !== stepId));
+          setConnections((prev) => prev.filter((c) => c.source !== stepId && c.target !== stepId));
+          setSelectedStepId((prev) => (prev === stepId ? null : prev));
+          toast({ title: "Step deleted" });
+        } catch (error) {
+          console.error("Failed to delete step:", error);
+          toast({
+            variant: "destructive",
+            title: "Error",
+            description: "Failed to delete step.",
+          });
+        } finally {
+          setIsSaving(false);
+        }
+        return;
+      }
+
+      const step = steps.find((s) => s.id === stepId);
+      if (!step) return;
+
+      // Avoid creating history entries for no-op edits.
+      if (step.step_name === trimmed) {
+        setInlineEditingStepId(null);
+        return;
+      }
+
+      pushSnapshot(cloneSnapshot(currentSnapshot));
+
+      setIsSaving(true);
+      try {
+        const updated = await updateStep(stepId, { name: trimmed });
+        setSteps((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+        setInlineEditingStepId(null);
+      } catch (error) {
+        console.error("Failed to rename step:", error);
+        toast({
+          variant: "destructive",
+          title: "Error",
+          description: "Failed to update step name.",
+        });
+      } finally {
+        setIsSaving(false);
+      }
+    },
+    [steps, pushSnapshot, cloneSnapshot, currentSnapshot, toast]
+  );
 
   const handleAddStep = async () => {
     if (!stepForm.name.trim() || !workflow) {
@@ -214,6 +754,8 @@ export default function WorkflowDetailPage() {
       return;
     }
 
+    pushSnapshot(cloneSnapshot(currentSnapshot));
+    setInlineEditingStepId(null);
     setIsSaving(true);
     try {
       const leadTime =
@@ -235,6 +777,7 @@ export default function WorkflowDetailPage() {
       }
 
       const newStep = await createStep({
+        id: crypto.randomUUID(),
         process_id: workflow.id,
         name: stepForm.name.trim(),
         description: stepForm.description.trim() || undefined,
@@ -275,6 +818,8 @@ export default function WorkflowDetailPage() {
       return;
     }
 
+    pushSnapshot(cloneSnapshot(currentSnapshot));
+    setInlineEditingStepId(null);
     setIsSaving(true);
     try {
       const leadTime =
@@ -326,6 +871,8 @@ export default function WorkflowDetailPage() {
   };
 
   const handleDeleteStep = async (stepId: string) => {
+    pushSnapshot(cloneSnapshot(currentSnapshot));
+    setInlineEditingStepId(null);
     setIsSaving(true);
     try {
       await deleteStep(stepId);
@@ -333,6 +880,7 @@ export default function WorkflowDetailPage() {
       setConnections(
         connections.filter((c) => c.source !== stepId && c.target !== stepId)
       );
+      if (selectedStepId === stepId) setSelectedStepId(null);
       setIsEditStepDialogOpen(false);
       setEditingStep(null);
 
@@ -361,6 +909,8 @@ export default function WorkflowDetailPage() {
     );
     if (exists) return;
 
+    pushSnapshot(cloneSnapshot(currentSnapshot));
+    setInlineEditingStepId(null);
     try {
       const newConn = await createConnection(
         workflow.id,
@@ -371,10 +921,6 @@ export default function WorkflowDetailPage() {
         ...connections,
         { id: newConn.id, source: sourceId, target: targetId },
       ]);
-      setConnectionIds({
-        ...connectionIds,
-        [`${sourceId}-${targetId}`]: newConn.id,
-      });
 
       toast({
         title: "Connection added",
@@ -395,6 +941,8 @@ export default function WorkflowDetailPage() {
     const connId = connectionIds[key];
     if (!connId) return;
 
+    pushSnapshot(cloneSnapshot(currentSnapshot));
+    setInlineEditingStepId(null);
     try {
       await deleteConnection(connId);
       setConnections(
@@ -402,9 +950,6 @@ export default function WorkflowDetailPage() {
           (c) => !(c.source === sourceId && c.target === targetId)
         )
       );
-      const newConnIds = { ...connectionIds };
-      delete newConnIds[key];
-      setConnectionIds(newConnIds);
 
       toast({
         title: "Connection removed",
@@ -606,7 +1151,7 @@ export default function WorkflowDetailPage() {
       name: "",
       description: "",
       type: "action",
-      lane: customLanes[0] || "Requester",
+      lane: laneNames[0] || "Requester",
       lead_time_minutes: "",
       cycle_time_minutes: "",
     });
@@ -631,9 +1176,6 @@ export default function WorkflowDetailPage() {
     );
   }
 
-  // Calculate unique lanes
-  const uniqueLanes = new Set(steps.map((s) => s.lane));
-
   return (
     <div className="flex flex-col h-full">
       <Header
@@ -650,6 +1192,33 @@ export default function WorkflowDetailPage() {
 
             {isEditMode ? (
               <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void handleUndo()}
+                  disabled={!canUndo || isSaving}
+                  title="Undo (Cmd/Ctrl+Z)"
+                >
+                  <Undo2 className="mr-2 h-4 w-4" />
+                  Undo
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void handleRedo()}
+                  disabled={!canRedo || isSaving}
+                  title="Redo (Cmd/Ctrl+Shift+Z)"
+                >
+                  <Redo2 className="mr-2 h-4 w-4" />
+                  Redo
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setIsSwimlaneManagerOpen(true)}
+                >
+                  Manage Swimlanes
+                </Button>
                 <Button
                   variant="outline"
                   size="sm"
@@ -756,7 +1325,7 @@ export default function WorkflowDetailPage() {
           </Badge>
         )}
         <Badge variant="secondary">{steps.length} Steps</Badge>
-        <Badge variant="secondary">{uniqueLanes.size} Swimlanes</Badge>
+        <Badge variant="secondary">{lanes.length} Swimlanes</Badge>
         {Object.keys(observations).length > 0 && (
           <>
             <Badge
@@ -780,50 +1349,107 @@ export default function WorkflowDetailPage() {
         )}
         {isEditMode && (
           <p className="text-sm text-muted-foreground ml-auto">
-            Click a step to edit it
+            Double-click canvas to add. Select a step, press E to edit. Double-click the name to rename.
           </p>
         )}
       </div>
 
       {/* Process Map */}
       <div className="flex-1" id="workflow-process-map-export">
-        {steps.length > 0 ? (
-        <ProcessMap
-          workflowId={params.id as string}
+        <div className="h-full relative">
+          {isEditMode && (
+            <div className="absolute left-4 bottom-4 z-20">
+              <StepToolbox />
+            </div>
+          )}
+          <ProcessMap
+            workflowId={params.id as string}
+            lanes={laneNames}
+            laneStyles={laneStyles}
             steps={steps}
             connections={connections}
             observations={observations}
-          selectedStepId={selectedStepId}
-          onStepClick={handleStepClick}
-          showHeatmap={showHeatmap}
-          onToggleHeatmap={setShowHeatmap}
+            selectedStepId={selectedStepId}
+            onSelectStep={handleSelectStep}
+            onStepClick={handleStepClick}
+            onQuickAddStep={handleQuickAddStep}
+            onCreateStepFromToolbox={handleCreateStepFromToolbox}
+            inlineEditingStepId={inlineEditingStepId}
+            onStartInlineEditStep={handleStartInlineEditStep}
+            onInlineEditStep={handleInlineEditStep}
+            onCancelInlineEditStep={handleCancelInlineEditStep}
+            showHeatmap={showHeatmap}
+            onToggleHeatmap={setShowHeatmap}
             isEditMode={isEditMode}
+            onDeleteStep={(stepId) => void handleDeleteStep(stepId)}
             onConnect={handleConnect}
             onDeleteConnection={handleDeleteConnection}
             onReactFlowInit={(instance) => {
               reactFlowInstanceRef.current = instance;
             }}
           />
-        ) : (
-          <div className="flex flex-col items-center justify-center h-full text-center p-6">
-            <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mb-4">
-              <Edit className="h-8 w-8 text-muted-foreground" />
+
+          {steps.length === 0 && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="max-w-md rounded-xl border bg-background/90 backdrop-blur px-5 py-4 text-center shadow-sm pointer-events-auto">
+                <div className="flex items-center justify-center gap-2 mb-2">
+                  <div className="w-10 h-10 rounded-lg bg-brand-gold/15 flex items-center justify-center">
+                    <Edit className="h-5 w-5 text-brand-gold" />
+                  </div>
+                </div>
+                <h3 className="text-base font-medium mb-1">Start building your workflow</h3>
+                <p className="text-sm text-muted-foreground mb-4">
+                  Enter edit mode, then double-click the canvas (or press <span className="font-medium">N</span>) to add your first step.
+                </p>
+                {!isEditMode ? (
+                  <Button
+                    size="sm"
+                    className="bg-brand-gold hover:bg-brand-gold/90 text-brand-navy"
+                    onClick={() => setIsEditMode(true)}
+                  >
+                    <Edit className="mr-2 h-4 w-4" />
+                    Enter Edit Mode
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setIsAddStepDialogOpen(true)}
+                  >
+                    <Plus className="mr-2 h-4 w-4" />
+                    Add Step via Form
+                  </Button>
+                )}
+              </div>
             </div>
-            <h3 className="text-lg font-medium mb-2">No steps defined</h3>
-            <p className="text-muted-foreground mb-4 max-w-md">
-              This workflow doesn&apos;t have any steps yet. Add steps to
-              visualize your process.
-            </p>
-            <Button onClick={() => {
-              setIsEditMode(true);
-              setIsAddStepDialogOpen(true);
-            }}>
-              <Plus className="mr-2 h-4 w-4" />
-              Add First Step
-            </Button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
+
+      <SwimlaneManager
+        open={isSwimlaneManagerOpen}
+        onOpenChange={setIsSwimlaneManagerOpen}
+        lanes={lanes}
+        steps={steps}
+        isSaving={isSaving}
+        onAddLane={async (name) => {
+          if (!workflow) return;
+          setIsSaving(true);
+          try {
+            const created = await createLane(workflow.id, name);
+            const refreshed = await getProcessLanes(workflow.id);
+            setLanes(refreshed);
+            setStepForm((prev) => ({ ...prev, lane: created.name }));
+          } finally {
+            setIsSaving(false);
+          }
+        }}
+        onReorder={handleReorderLanes}
+        onRename={handleRenameLane}
+        onDelete={handleDeleteLane}
+        onDeleteMoveSteps={handleDeleteLaneMoveSteps}
+        onUpdateLaneColor={handleUpdateLaneColor}
+      />
 
       {/* Step Detail Panel (View Mode) */}
       {!isEditMode && (
@@ -947,7 +1573,7 @@ export default function WorkflowDetailPage() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {customLanes.map((lane) => (
+                      {laneNames.map((lane) => (
                         <SelectItem key={lane} value={lane}>
                           {lane}
                         </SelectItem>
@@ -1125,7 +1751,7 @@ export default function WorkflowDetailPage() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {customLanes.map((lane) => (
+                      {laneNames.map((lane) => (
                         <SelectItem key={lane} value={lane}>
                           {lane}
                         </SelectItem>
@@ -1207,6 +1833,35 @@ export default function WorkflowDetailPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Context Drawer Trigger Button */}
+      <div
+        className="fixed z-40 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] left-[calc(1rem+env(safe-area-inset-left))] md:left-[calc(17rem+1.5rem)]"
+      >
+        <ContextTriggerButton
+          completeness={contextCompleteness}
+          onClick={() => setIsContextDrawerOpen(true)}
+        />
+      </div>
+
+      {/* Workflow Context Drawer */}
+      <WorkflowContextDrawer
+        open={isContextDrawerOpen}
+        onOpenChange={(open) => {
+          setIsContextDrawerOpen(open);
+          // Refresh completeness when drawer closes
+          if (!open) {
+            fetch(`/api/workflows/${params.id}/context`)
+              .then((res) => res.json())
+              .then((data) => {
+                setContextCompleteness(data.completeness?.overallScore || 0);
+              })
+              .catch(console.error);
+          }
+        }}
+        processId={params.id as string}
+        workflowName={workflow?.name || "Workflow"}
+      />
     </div>
   );
 }

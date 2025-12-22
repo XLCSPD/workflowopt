@@ -1,6 +1,6 @@
 "use client";
 
-import { memo } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { Handle, Position, NodeProps } from "reactflow";
 import { cn } from "@/lib/utils";
 import type { ProcessStep } from "@/types";
@@ -19,6 +19,10 @@ interface StepNodeData {
   priorityScore: number;
   heatmapIntensity?: "low" | "medium" | "high" | "critical";
   onClick?: () => void;
+  isInlineEditing?: boolean;
+  onInlineEdit?: (newName: string) => void;
+  onCancelInlineEdit?: () => void;
+  onStartInlineEdit?: () => void;
 }
 
 const getStepIcon = (type: string) => {
@@ -52,8 +56,35 @@ const getHeatmapColor = (intensity?: string) => {
 };
 
 function StepNodeComponent({ data }: NodeProps<StepNodeData>) {
-  const { step, isSelected, observationCount, priorityScore, heatmapIntensity, onClick } = data;
+  const {
+    step,
+    isSelected,
+    observationCount,
+    priorityScore,
+    heatmapIntensity,
+    onClick,
+    isInlineEditing,
+    onInlineEdit,
+    onCancelInlineEdit,
+    onStartInlineEdit,
+  } = data;
   const Icon = getStepIcon(step.step_type);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  // Keep a local draft to avoid jitter while typing.
+  const [draftName, setDraftName] = useState(step.step_name);
+  const initialName = useMemo(() => step.step_name, [step.step_name]);
+
+  useEffect(() => {
+    if (isInlineEditing) {
+      setDraftName(step.step_name);
+      // Focus/select on next tick so React Flow node mount has settled.
+      setTimeout(() => {
+        inputRef.current?.focus();
+        inputRef.current?.select();
+      }, 0);
+    }
+  }, [isInlineEditing, step.step_name]);
 
   return (
     <>
@@ -90,9 +121,42 @@ function StepNodeComponent({ data }: NodeProps<StepNodeData>) {
 
         {/* Step Content */}
         <div className="space-y-1">
-          <p className="font-medium text-sm text-brand-navy line-clamp-2">
-            {step.step_name}
-          </p>
+          {isInlineEditing ? (
+            <input
+              ref={inputRef}
+              value={draftName}
+              onChange={(e) => setDraftName(e.target.value)}
+              onClick={(e) => e.stopPropagation()}
+              onDoubleClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  e.currentTarget.blur();
+                } else if (e.key === "Escape") {
+                  e.preventDefault();
+                  setDraftName(initialName);
+                  onCancelInlineEdit?.();
+                }
+              }}
+              onBlur={() => {
+                onInlineEdit?.(draftName);
+              }}
+              className="step-node-inline-edit"
+              aria-label="Edit step name"
+            />
+          ) : (
+            <p
+              className="font-medium text-sm text-brand-navy line-clamp-2"
+              onDoubleClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onStartInlineEdit?.();
+              }}
+              title={step.step_name}
+            >
+              {step.step_name}
+            </p>
+          )}
           {step.description && (
             <p className="text-xs text-muted-foreground line-clamp-1">
               {step.description}

@@ -1,5 +1,5 @@
 import { getSupabaseClient } from "@/lib/supabase/client";
-import type { ProcessStep, StepType } from "@/types";
+import type { ProcessLane, ProcessStep, StepType } from "@/types";
 
 const supabase = getSupabaseClient();
 
@@ -8,6 +8,7 @@ const supabase = getSupabaseClient();
 // ============================================
 
 export interface CreateStepInput {
+  id?: string;
   process_id: string;
   name: string;
   description?: string;
@@ -35,6 +36,7 @@ export interface UpdateStepInput {
 export async function createStep(input: CreateStepInput): Promise<ProcessStep> {
   // Map input to database column names
   const dbInput = {
+    ...(input.id ? { id: input.id } : {}),
     process_id: input.process_id,
     step_name: input.name,
     description: input.description,
@@ -125,11 +127,13 @@ export async function createConnection(
   processId: string,
   sourceStepId: string,
   targetStepId: string,
-  label?: string
+  label?: string,
+  id?: string
 ): Promise<StepConnection> {
   const { data, error } = await supabase
     .from("step_connections")
     .insert({
+      ...(id ? { id } : {}),
       process_id: processId,
       source_step_id: sourceStepId,
       target_step_id: targetStepId,
@@ -238,5 +242,136 @@ export function getDefaultLanes(): string[] {
 
 export function generateStepId(): string {
   return `step-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+}
+
+// ============================================
+// LANE (SWIMLANE) OPERATIONS
+// ============================================
+
+export async function getProcessLanes(processId: string): Promise<ProcessLane[]> {
+  const { data, error } = await supabase
+    .from("process_lanes")
+    .select("*")
+    .eq("process_id", processId)
+    .order("order_index", { ascending: true });
+
+  if (error) throw error;
+  return (data || []) as ProcessLane[];
+}
+
+export async function ensureDefaultProcessLanes(processId: string): Promise<ProcessLane[]> {
+  const existing = await getProcessLanes(processId);
+  if (existing.length > 0) return existing;
+
+  const defaults = getDefaultLanes();
+  const rows = defaults.map((name, idx) => ({
+    process_id: processId,
+    name,
+    order_index: idx,
+  }));
+
+  // IMPORTANT: This can be called multiple times concurrently on first-load
+  // (e.g. React effects / rerenders). Use an idempotent write to avoid unique
+  // constraint errors on (process_id, name).
+  const { error } = await supabase
+    .from("process_lanes")
+    .upsert(rows, { onConflict: "process_id,name", ignoreDuplicates: true });
+
+  if (error) throw error;
+
+  // Always re-read to return the canonical, ordered set.
+  return await getProcessLanes(processId);
+}
+
+export async function createLane(processId: string, name: string): Promise<ProcessLane> {
+  const trimmed = name.trim();
+  if (!trimmed) throw new Error("Lane name is required");
+
+  const current = await getProcessLanes(processId);
+  const nextOrder = current.length;
+
+  const { data, error } = await supabase
+    .from("process_lanes")
+    .insert({
+      process_id: processId,
+      name: trimmed,
+      order_index: nextOrder,
+    })
+    .select("*")
+    .single();
+
+  if (error) throw error;
+  return data as ProcessLane;
+}
+
+export async function reorderLanes(processId: string, orderedLaneIds: string[]): Promise<void> {
+  // Batch updates (one per lane id). Kept simple; lane counts are small.
+  const updates = orderedLaneIds.map((id, index) =>
+    supabase.from("process_lanes").update({ order_index: index }).eq("id", id).eq("process_id", processId)
+  );
+
+  const results = await Promise.all(updates);
+  const firstError = results.find((r) => r.error)?.error;
+  if (firstError) throw firstError;
+}
+
+export async function renameLane(processId: string, oldName: string, newName: string): Promise<void> {
+  const trimmedOld = oldName.trim();
+  const trimmedNew = newName.trim();
+  if (!trimmedOld) throw new Error("Old lane name is required");
+  if (!trimmedNew) throw new Error("New lane name is required");
+
+  // Prefer atomic RPC
+  const { error } = await supabase.rpc("rename_process_lane", {
+    process_id: processId,
+    old_name: trimmedOld,
+    new_name: trimmedNew,
+  });
+
+  if (error) throw error;
+}
+
+export async function deleteLane(processId: string, laneId: string): Promise<void> {
+  const { error } = await supabase
+    .from("process_lanes")
+    .delete()
+    .eq("id", laneId)
+    .eq("process_id", processId);
+
+  if (error) throw error;
+}
+
+export async function updateLaneColor(
+  processId: string,
+  laneId: string,
+  colors: { bg_color?: string | null; border_color?: string | null }
+): Promise<ProcessLane> {
+  const { data, error } = await supabase
+    .from("process_lanes")
+    .update({
+      bg_color: colors.bg_color ?? null,
+      border_color: colors.border_color ?? null,
+    })
+    .eq("id", laneId)
+    .eq("process_id", processId)
+    .select("*")
+    .single();
+
+  if (error) throw error;
+  return data as ProcessLane;
+}
+
+export async function deleteLaneMoveSteps(
+  processId: string,
+  laneId: string,
+  destinationLaneId: string
+): Promise<void> {
+  const { error } = await supabase.rpc("delete_process_lane", {
+    process_id: processId,
+    lane_id: laneId,
+    destination_lane_id: destinationLaneId,
+  });
+
+  if (error) throw error;
 }
 

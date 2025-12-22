@@ -16,6 +16,7 @@ import {
   ChevronRight,
   Menu,
   X,
+  Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -59,6 +60,11 @@ const navItems = [
     title: "Sessions",
     href: "/sessions",
     icon: Users,
+  },
+  {
+    title: "Future State Studio",
+    href: "/future-state",
+    icon: Sparkles,
   },
   {
     title: "Analytics",

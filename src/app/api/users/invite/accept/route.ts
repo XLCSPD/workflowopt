@@ -17,6 +17,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    // Prefer the user's chosen/display name from auth metadata (set during invite acceptance).
+    // We'll mirror it into public.users so names reliably show up in joins (e.g. observations.user).
+    const meta = (authUser.user_metadata ?? {}) as Record<string, unknown>;
+    const metaNameRaw =
+      (typeof meta.name === "string" && meta.name) ||
+      (typeof meta.full_name === "string" && meta.full_name) ||
+      (typeof meta.display_name === "string" && meta.display_name) ||
+      "";
+    const metaName = metaNameRaw.trim() ? metaNameRaw.trim() : undefined;
+
     const body = (await request.json().catch(() => ({}))) as AcceptInviteBody;
 
     const invitationIdFromMeta =
@@ -79,6 +89,7 @@ export async function POST(request: NextRequest) {
       .update({
         org_id: invitation.org_id ?? null,
         role: invitation.role ?? "participant",
+        ...(metaName ? { name: metaName } : {}),
       })
       .eq("id", authUser.id);
 

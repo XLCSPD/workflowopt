@@ -1,5 +1,5 @@
 import { getSupabaseClient } from "@/lib/supabase/client";
-import type { Process, ProcessStep } from "@/types";
+import type { Process, ProcessLane, ProcessStep } from "@/types";
 
 const supabase = getSupabaseClient();
 
@@ -168,16 +168,26 @@ export async function deleteStepConnection(id: string) {
 // ============================================
 
 export async function getWorkflowWithDetails(processId: string) {
-  const [process, steps, connections] = await Promise.all([
+  const [process, steps, connections, lanes] = await Promise.all([
     getProcessById(processId),
     getProcessSteps(processId),
     getStepConnections(processId),
+    (async () => {
+      const { data, error } = await supabase
+        .from("process_lanes")
+        .select("*")
+        .eq("process_id", processId)
+        .order("order_index", { ascending: true });
+      if (error) throw error;
+      return (data || []) as ProcessLane[];
+    })(),
   ]);
 
   return {
     process,
     steps,
     connections,
+    lanes,
   };
 }
 

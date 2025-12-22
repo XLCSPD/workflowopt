@@ -122,6 +122,36 @@
   box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
 }
 
+/* Blank-canvas workflow builder polish */
+@layer components {
+  /* Inline edit input in step nodes */
+  .step-node-inline-edit {
+    @apply font-medium text-sm w-full border-b-2 border-brand-gold outline-none bg-transparent;
+    @apply text-brand-navy;
+  }
+
+  /* Keyboard shortcuts badge styling */
+  .keyboard-shortcuts-help {
+    @apply text-xs text-muted-foreground bg-muted/50 px-2 py-1 rounded;
+  }
+}
+
+/* Enhanced connection handles */
+.react-flow__handle {
+  transition: transform 150ms ease, box-shadow 150ms ease, opacity 150ms ease;
+}
+
+.react-flow__handle:hover {
+  transform: scale(1.5);
+  box-shadow: 0 0 0 4px hsl(var(--brand-gold) / 0.25);
+}
+
+/* Connection line preview */
+.react-flow__connection-line {
+  stroke: hsl(var(--brand-gold)) !important;
+  stroke-width: 2px !important;
+}
+
 /* Improve PDF exports of React Flow (avoid text clipping) */
 .workflow-exporting .react-flow__node p {
   line-height: 1.25 !important;
@@ -191,4 +221,160 @@
 
 .animate-pulse-ring {
   animation: pulse-ring 1.5s ease-out infinite;
+}
+
+/* Context Drawer Animations */
+.context-drawer {
+  @apply fixed inset-y-0 right-0 z-50 w-full sm:w-[480px] bg-white shadow-2xl;
+  @apply border-l border-border;
+}
+
+.context-drawer[data-state="open"] {
+  animation: drawerSlideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.context-drawer[data-state="closed"] {
+  animation: drawerSlideOut 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes drawerSlideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes drawerSlideOut {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+}
+
+/* Staggered reveal for accordion sections */
+.context-section {
+  opacity: 0;
+  animation: sectionReveal 0.3s ease-out forwards;
+}
+
+.context-section:nth-child(1) { animation-delay: 0.05s; }
+.context-section:nth-child(2) { animation-delay: 0.1s; }
+.context-section:nth-child(3) { animation-delay: 0.15s; }
+.context-section:nth-child(4) { animation-delay: 0.2s; }
+.context-section:nth-child(5) { animation-delay: 0.25s; }
+.context-section:nth-child(6) { animation-delay: 0.3s; }
+
+@keyframes sectionReveal {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Shimmer loading effect for AI generation */
+.shimmer-loading {
+  background: linear-gradient(
+    90deg,
+    hsl(var(--muted)) 25%,
+    hsl(var(--muted-foreground) / 0.1) 50%,
+    hsl(var(--muted)) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 2s linear infinite;
+}
+
+@keyframes shimmer {
+  from {
+    background-position: -200% 0;
+  }
+  to {
+    background-position: 200% 0;
+  }
+}
+
+/* Progress ring for context completion */
+.progress-ring-circle {
+  transition: stroke-dashoffset 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+  transform: rotate(-90deg);
+  transform-origin: 50% 50%;
+}
+
+/* Tag animation for triggers/outcomes */
+.context-tag {
+  animation: popIn 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+@keyframes popIn {
+  0% {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  70% {
+    opacity: 1;
+    transform: scale(1.05);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Gold glow effect for trigger button */
+.context-trigger-button {
+  @apply relative;
+}
+
+.context-trigger-button::before {
+  content: "";
+  @apply absolute inset-0 rounded-full;
+  background: radial-gradient(circle, rgba(255, 192, 0, 0.3) 0%, transparent 70%);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.context-trigger-button:hover::before {
+  opacity: 1;
+}
+
+/* Field focus animation */
+.context-field:focus-within {
+  @apply ring-2 ring-brand-gold/30;
+}
+
+.context-field input:focus,
+.context-field textarea:focus {
+  @apply border-brand-gold;
+  transition: border-color 0.2s ease;
+}
+
+/* Success pulse for save confirmation */
+.save-success {
+  animation: pulseSuccess 0.5s ease-out;
+}
+
+@keyframes pulseSuccess {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.2);
+    opacity: 0.8;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
 }

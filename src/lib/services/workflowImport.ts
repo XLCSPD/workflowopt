@@ -712,6 +712,22 @@ step-4,step-5,`;
   return { steps: stepsCSV, connections: connectionsCSV };
 }
 
+// ---------------------------------------------------------------------------
+// Backwards-compatible exports for existing unit tests
+// ---------------------------------------------------------------------------
+
+export function getSampleJsonWorkflow(): string {
+  return generateSampleJSON();
+}
+
+export function getSampleCsvSteps(): string {
+  return generateSampleCSV().steps;
+}
+
+export function getSampleCsvConnections(): string {
+  return generateSampleCSV().connections;
+}
+
 // ============================================
 // PREMIER HEALTH CSV CONVERTER
 // ============================================

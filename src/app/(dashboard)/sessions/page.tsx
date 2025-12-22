@@ -27,6 +27,7 @@ import {
   Eye,
   Trash2,
   Loader2,
+  RotateCcw,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
@@ -36,6 +37,7 @@ import {
   endSession,
   archiveSession,
   deleteSession,
+  reopenSession,
 } from "@/lib/services/sessions";
 import type { SessionWithDetails } from "@/lib/services/sessions";
 
@@ -157,6 +159,24 @@ export default function SessionsPage() {
         variant: "destructive",
         title: "Error",
         description: "Failed to archive session.",
+      });
+    }
+  };
+
+  const handleReopenSession = async (id: string) => {
+    try {
+      await reopenSession(id);
+      await loadSessions();
+      toast({
+        title: "Session reopened",
+        description: "The session is now active again.",
+      });
+    } catch (error) {
+      console.error("Failed to reopen session:", error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to reopen session.",
       });
     }
   };
@@ -337,6 +357,14 @@ export default function SessionsPage() {
                                   >
                                     <Pause className="mr-2 h-4 w-4" />
                                     End Session
+                                  </DropdownMenuItem>
+                                )}
+                                {(session.status === "completed" || session.status === "archived") && (
+                                  <DropdownMenuItem
+                                    onClick={() => handleReopenSession(session.id)}
+                                  >
+                                    <RotateCcw className="mr-2 h-4 w-4" />
+                                    Reopen Session
                                   </DropdownMenuItem>
                                 )}
                                 <DropdownMenuItem

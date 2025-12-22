@@ -33,6 +33,117 @@ export interface ComparisonResult {
 // SESSION COMPARISON
 // ============================================
 
+// ---------------------------------------------------------------------------
+// Backwards-compatible APIs (used by unit tests)
+// ---------------------------------------------------------------------------
+
+type ObservationForCompare = {
+  priority_score: number;
+  is_digital: boolean;
+  is_physical: boolean;
+  observation_waste_links?: { waste_type?: { id: string; name: string } }[];
+};
+
+export interface SessionMetricsForCompare {
+  totalObservations: number;
+  avgPriority: number;
+  digitalPercentage: number;
+  topWasteTypes: { name: string; count: number }[];
+}
+
+export interface SessionMetricsComparison {
+  session1: SessionMetricsForCompare;
+  session2: SessionMetricsForCompare;
+  differences: {
+    observationsDelta: number;
+    priorityDelta: number;
+    digitalDelta: number;
+  };
+}
+
+function computeMetrics(observations: ObservationForCompare[]): SessionMetricsForCompare {
+  const total = observations.length;
+  const avgPriority =
+    total === 0
+      ? 0
+      : observations.reduce((sum, o) => sum + (o.priority_score || 0), 0) / total;
+
+  const digitalCount = observations.filter((o) => !!o.is_digital).length;
+  const digitalPercentage = total === 0 ? 0 : (digitalCount / total) * 100;
+
+  const wasteCounts = new Map<string, number>();
+  observations.forEach((o) => {
+    (o.observation_waste_links || []).forEach((link) => {
+      const name = link?.waste_type?.name;
+      if (!name) return;
+      wasteCounts.set(name, (wasteCounts.get(name) || 0) + 1);
+    });
+  });
+
+  const topWasteTypes = Array.from(wasteCounts.entries())
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 5);
+
+  return {
+    totalObservations: total,
+    avgPriority,
+    digitalPercentage,
+    topWasteTypes,
+  };
+}
+
+function percentDelta(before: number, after: number): number {
+  if (before === 0) return after > 0 ? 100 : 0;
+  return ((after - before) / before) * 100;
+}
+
+export async function compareSessionMetrics(
+  session1Id: string,
+  session2Id: string
+): Promise<SessionMetricsComparison> {
+  const { data: obs1, error: err1 } = await supabase
+    .from("observations")
+    .select("priority_score,is_digital,is_physical,observation_waste_links(waste_type(id,name))")
+    .eq("session_id", session1Id);
+  if (err1) throw err1;
+
+  const { data: obs2, error: err2 } = await supabase
+    .from("observations")
+    .select("priority_score,is_digital,is_physical,observation_waste_links(waste_type(id,name))")
+    .eq("session_id", session2Id);
+  if (err2) throw err2;
+
+  const session1 = computeMetrics((obs1 as unknown as ObservationForCompare[]) || []);
+  const session2 = computeMetrics((obs2 as unknown as ObservationForCompare[]) || []);
+
+  return {
+    session1,
+    session2,
+    differences: {
+      observationsDelta: percentDelta(session1.totalObservations, session2.totalObservations),
+      priorityDelta: session2.avgPriority - session1.avgPriority,
+      digitalDelta: session2.digitalPercentage - session1.digitalPercentage,
+    },
+  };
+}
+
+export function getComparisonSuggestions(metrics: SessionMetricsComparison): string[] {
+  const suggestions: string[] = [];
+  const { observationsDelta, priorityDelta, digitalDelta } = metrics.differences;
+
+  if (observationsDelta < 0) suggestions.push("Fewer observations were recorded, indicating reduced waste detection or improved process flow.");
+  if (observationsDelta > 0) suggestions.push("More observations were recorded; review hotspots and prioritize high-impact waste types.");
+
+  if (priorityDelta < 0) suggestions.push("Average priority decreased; continue reinforcing the improvements that lowered severity.");
+  if (priorityDelta > 0) suggestions.push("Average priority increased; focus on the highest-priority waste drivers first.");
+
+  if (digitalDelta > 10) suggestions.push("Digital waste increased noticeably; examine handoffs, rework loops, and system friction.");
+  if (digitalDelta < -10) suggestions.push("Digital waste decreased; standardize the changes that reduced digital friction.");
+
+  return suggestions;
+}
+
 export async function getSessionComparisonData(sessionId: string): Promise<SessionComparisonData> {
   // Get session details
   const { data: session, error } = await supabase
