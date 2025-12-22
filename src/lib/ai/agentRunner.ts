@@ -240,11 +240,22 @@ async function callLLM(
   const openaiKey = process.env.OPENAI_API_KEY;
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
 
+  // Debug logging for production troubleshooting
+  console.log("[callLLM] Checking API keys:", {
+    hasOpenAI: !!openaiKey,
+    hasAnthropic: !!anthropicKey,
+    openaiKeyLength: openaiKey?.length || 0,
+    anthropicKeyLength: anthropicKey?.length || 0,
+  });
+
   if (openaiKey) {
+    console.log("[callLLM] Using OpenAI");
     return callOpenAI(systemPrompt, userPrompt, openaiKey);
   } else if (anthropicKey) {
+    console.log("[callLLM] Using Anthropic");
     return callAnthropic(systemPrompt, userPrompt, anthropicKey);
   } else {
+    console.error("[callLLM] No API keys found in environment");
     throw new Error("No LLM API key configured (OPENAI_API_KEY or ANTHROPIC_API_KEY)");
   }
 }
