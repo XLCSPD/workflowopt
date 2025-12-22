@@ -142,7 +142,9 @@ const actionColors = {
   },
 };
 
-const _designStatusConfig: Record<StepDesignStatus, { icon: typeof CheckCircle2; color: string }> = {
+// Reserved for future use: design status indicators on nodes
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const designStatusConfig: Record<StepDesignStatus, { icon: typeof CheckCircle2; color: string }> = {
   strategy_only: { icon: Layers, color: "text-gray-400" },
   needs_step_design: { icon: AlertCircle, color: "text-amber-500" },
   step_design_complete: { icon: CheckCircle2, color: "text-emerald-500" },

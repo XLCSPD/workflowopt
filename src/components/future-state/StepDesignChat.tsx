@@ -56,13 +56,16 @@ interface StepDesignChatProps {
 // ============================================
 
 export function StepDesignChat({
-  sessionId: _sessionId,
-  futureStateId: _futureStateId,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  sessionId,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  futureStateId,
   nodeId,
   userId,
   nodeName,
   initialQuestions = [],
-  existingContext: _existingContext,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  existingContext,
   onContextComplete,
   onGenerateDesign,
 }: StepDesignChatProps) {

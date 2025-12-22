@@ -152,7 +152,8 @@ export async function upsertWorkflowContext(
   const supabase = await getServerSupabase();
 
   // Check if context exists
-  const { data: existing, error: _existingError } = await supabase
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { data: existing, error: existingError } = await supabase
     .from("workflow_contexts")
     .select("id")
     .eq("workflow_id", processId)
