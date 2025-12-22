@@ -110,6 +110,24 @@ export function FutureStateDesigner({
   const [stepDesignPanelOpen, setStepDesignPanelOpen] = useState(false);
   const [contextPanelOpen, setContextPanelOpen] = useState(true);
   const [highlightedStepId, setHighlightedStepId] = useState<string | null>(null);
+  const [isMobile, setIsMobile] = useState(false);
+
+  // Detect mobile viewport
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
+
+  // Auto-collapse context panel on mobile
+  useEffect(() => {
+    if (isMobile) {
+      setContextPanelOpen(false);
+    }
+  }, [isMobile]);
 
   // Realtime studio for future use with presence/cursors
   void _realtimeStudio;
@@ -443,8 +461,8 @@ export function FutureStateDesigner({
         </div>
       }
     >
-      {/* Session Context Header */}
-      {observations.length > 0 && (
+      {/* Session Context Header - hide on mobile for cleaner view */}
+      {observations.length > 0 && !isMobile && (
         <SessionContextHeader
           observations={observations}
           solutions={acceptedSolutions}
@@ -467,12 +485,12 @@ export function FutureStateDesigner({
           </CardContent>
         </Card>
       ) : selectedFutureState ? (
-        <div className="flex gap-4 mt-4">
-          {/* Left Sidebar - Workflow Context Panel */}
+        <div className="flex flex-col md:flex-row gap-4 mt-4">
+          {/* Left Sidebar - Workflow Context Panel (hidden on mobile) */}
           <Collapsible
             open={contextPanelOpen}
             onOpenChange={setContextPanelOpen}
-            className="flex-shrink-0"
+            className="flex-shrink-0 hidden md:block"
           >
             <div className="flex items-start">
               <CollapsibleContent className="w-56">
@@ -510,20 +528,23 @@ export function FutureStateDesigner({
           {/* Main Content */}
           <div className="flex-1 space-y-4 min-w-0">
             {/* View Mode Toggle */}
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
               <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as typeof viewMode)}>
-                <TabsList>
-                  <TabsTrigger value="flowchart" className="gap-2">
-                    <Workflow className="h-4 w-4" />
-                    Flowchart
+                <TabsList className="h-auto flex-wrap">
+                  <TabsTrigger value="flowchart" className="gap-1 sm:gap-2 text-xs sm:text-sm px-2 sm:px-3">
+                    <Workflow className="h-3 w-3 sm:h-4 sm:w-4" />
+                    <span className="hidden xs:inline">Flowchart</span>
+                    <span className="xs:hidden">Flow</span>
                   </TabsTrigger>
-                  <TabsTrigger value="side-by-side" className="gap-2">
-                    <GitCompare className="h-4 w-4" />
-                    Side by Side
+                  <TabsTrigger value="side-by-side" className="gap-1 sm:gap-2 text-xs sm:text-sm px-2 sm:px-3">
+                    <GitCompare className="h-3 w-3 sm:h-4 sm:w-4" />
+                    <span className="hidden sm:inline">Side by Side</span>
+                    <span className="sm:hidden">Compare</span>
                   </TabsTrigger>
-                  <TabsTrigger value="future-only" className="gap-2">
-                    <Layers className="h-4 w-4" />
-                    Future Only
+                  <TabsTrigger value="future-only" className="gap-1 sm:gap-2 text-xs sm:text-sm px-2 sm:px-3">
+                    <Layers className="h-3 w-3 sm:h-4 sm:w-4" />
+                    <span className="hidden sm:inline">Future Only</span>
+                    <span className="sm:hidden">Future</span>
                   </TabsTrigger>
                 </TabsList>
               </Tabs>
@@ -871,7 +892,7 @@ export function FutureStateDesigner({
 
       {/* Step Design Panel Sheet */}
       <Sheet open={stepDesignPanelOpen} onOpenChange={setStepDesignPanelOpen}>
-        <SheetContent side="right" className="w-full sm:w-[480px] p-0 flex flex-col h-full">
+        <SheetContent side="right" className="w-full sm:w-[480px] max-w-[100vw] p-0 flex flex-col h-full overflow-y-auto">
           {selectedNodeId && selectedFutureState ? (
             <StepDesignPanel
               sessionId={sessionId}

@@ -127,8 +127,8 @@ export function Header({ title, description, actions }: HeaderProps) {
       </div>
 
       <div className="flex items-center gap-2 sm:gap-4 flex-wrap justify-end w-full sm:w-auto">
-        {/* Search - hidden on mobile */}
-        <div className="relative hidden lg:block">
+        {/* Search - hidden on mobile/tablet */}
+        <div className="relative hidden xl:block">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Search..."
@@ -136,11 +136,17 @@ export function Header({ title, description, actions }: HeaderProps) {
           />
         </div>
 
-        {/* Actions slot */}
-        {actions}
+        {/* Actions slot - shown on larger screens, hidden on mobile for some pages */}
+        <div className="hidden sm:flex items-center gap-2">
+          {actions}
+        </div>
+        {/* Compact actions on mobile */}
+        <div className="sm:hidden flex items-center gap-2">
+          {actions}
+        </div>
 
-        {/* Help Button */}
-        <HelpButton className="h-8 w-8 sm:h-9 sm:w-9 hidden sm:flex" />
+        {/* Help Button - hidden on mobile */}
+        <HelpButton className="h-8 w-8 sm:h-9 sm:w-9 hidden md:flex" />
 
         {/* Notifications */}
         <DropdownMenu open={isOpen} onOpenChange={setIsOpen}>

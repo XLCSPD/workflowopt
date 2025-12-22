@@ -1363,7 +1363,8 @@ export default function AdminPage() {
                         </p>
                       </div>
                     </div>
-                    <div className="mt-3 rounded-lg border bg-muted/20 overflow-hidden">
+                    <div className="mt-3 rounded-lg border bg-muted/20 overflow-x-auto">
+                      <div className="min-w-[600px]">
                       <Table>
                         <TableHeader>
                           <TableRow>
@@ -1413,6 +1414,7 @@ export default function AdminPage() {
                           ))}
                         </TableBody>
                       </Table>
+                      </div>
                     </div>
                     <Separator className="mt-6" />
                   </div>
@@ -1551,7 +1553,7 @@ export default function AdminPage() {
                     </Table>
                   )
                 ) : (
-                  <div className="rounded-lg border bg-white overflow-hidden">
+                  <div className="rounded-lg border bg-white overflow-x-auto">
                     {isAdminUsersLoading ? (
                       <div className="flex items-center justify-center py-10">
                         <Loader2 className="h-6 w-6 animate-spin text-brand-gold" />
@@ -1562,15 +1564,16 @@ export default function AdminPage() {
                         <p>No users found.</p>
                       </div>
                     ) : (
+                      <div className="min-w-[800px]">
                       <Table>
                         <TableHeader>
                           <TableRow>
                             <TableHead>User</TableHead>
                             <TableHead>Email</TableHead>
-                            <TableHead>Org</TableHead>
+                            <TableHead className="hidden md:table-cell">Org</TableHead>
                             <TableHead>Role</TableHead>
-                            <TableHead>Status</TableHead>
-                            <TableHead>Last sign-in</TableHead>
+                            <TableHead className="hidden sm:table-cell">Status</TableHead>
+                            <TableHead className="hidden lg:table-cell">Last sign-in</TableHead>
                             <TableHead className="w-[70px]"></TableHead>
                           </TableRow>
                         </TableHeader>
@@ -1629,6 +1632,7 @@ export default function AdminPage() {
                           })}
                         </TableBody>
                       </Table>
+                      </div>
                     )}
                   </div>
                 )}

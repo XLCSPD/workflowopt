@@ -142,9 +142,9 @@ export default function AnalyticsPage() {
         title="Analytics Dashboard"
         description="Insights and trends from your waste identification sessions"
         actions={
-          <div className="flex items-center gap-4">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-4 w-full sm:w-auto">
             <Select value={selectedSession} onValueChange={setSelectedSession}>
-              <SelectTrigger className="w-[250px]">
+              <SelectTrigger className="w-full sm:w-[200px] lg:w-[250px]">
                 <SelectValue placeholder="Select session" />
               </SelectTrigger>
               <SelectContent>
@@ -156,10 +156,11 @@ export default function AnalyticsPage() {
                 ))}
               </SelectContent>
             </Select>
-            <Button asChild variant="outline">
+            <Button asChild variant="outline" className="w-full sm:w-auto">
               <Link href="/analytics/compare">
                 <GitCompare className="mr-2 h-4 w-4" />
-                Compare Sessions
+                <span className="hidden sm:inline">Compare Sessions</span>
+                <span className="sm:hidden">Compare</span>
               </Link>
             </Button>
           </div>
@@ -174,7 +175,7 @@ export default function AnalyticsPage() {
         ) : (
           <>
             {/* Summary Stats */}
-            <div className="grid gap-4 md:grid-cols-4">
+            <div className="grid gap-3 sm:gap-4 grid-cols-2 md:grid-cols-4">
               <Card>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm text-muted-foreground">
@@ -233,7 +234,7 @@ export default function AnalyticsPage() {
                 <CardContent>
                   {wasteDistribution.length > 0 ? (
                     <>
-                      <div className="h-[300px]">
+                      <div className="h-[250px] sm:h-[300px]">
                         <ResponsiveContainer width="100%" height="100%">
                           <PieChart>
                             <Pie
@@ -291,12 +292,12 @@ export default function AnalyticsPage() {
                 </CardHeader>
                 <CardContent>
                   {laneStats.length > 0 ? (
-                    <div className="h-[300px]">
+                    <div className="h-[250px] sm:h-[300px]">
                       <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={laneStats} layout="vertical">
+                        <BarChart data={laneStats} layout="vertical" margin={{ left: -20 }}>
                           <CartesianGrid strokeDasharray="3 3" />
                           <XAxis type="number" />
-                          <YAxis type="category" dataKey="lane" width={120} />
+                          <YAxis type="category" dataKey="lane" width={80} tick={{ fontSize: 11 }} />
                           <Tooltip />
                           <Legend />
                           <Bar

@@ -13,6 +13,13 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
+import {
   ArrowLeft,
   Users,
   Eye,
@@ -23,6 +30,7 @@ import {
   Loader2,
   Wifi,
   WifiOff,
+  Activity,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { formatDistanceToNow } from "date-fns";
@@ -82,6 +90,7 @@ export default function SessionDetailPage() {
   const [isDetailPanelOpen, setIsDetailPanelOpen] = useState(false);
   const [isTaggingPanelOpen, setIsTaggingPanelOpen] = useState(false);
   const [isEditPanelOpen, setIsEditPanelOpen] = useState(false);
+  const [isMobileActivityOpen, setIsMobileActivityOpen] = useState(false);
   const [editingObservation, setEditingObservation] = useState<ObservationWithDetails | null>(null);
   const [isUpdatingObservation, setIsUpdatingObservation] = useState(false);
   const [isDeletingObservation, setIsDeletingObservation] = useState(false);
@@ -448,7 +457,7 @@ export default function SessionDetailPage() {
         />
 
         {/* Stats Bar */}
-        <div className="px-6 py-3 border-b bg-muted/30 flex items-center gap-4">
+        <div className="px-4 sm:px-6 py-3 border-b bg-muted/30 flex flex-wrap items-center gap-2 sm:gap-4">
           <Badge
             className={
               session.status === "active"
@@ -478,7 +487,7 @@ export default function SessionDetailPage() {
             )}
           </Badge>
           {session.started_at && (
-          <span className="text-sm text-muted-foreground flex items-center gap-1">
+          <span className="text-xs sm:text-sm text-muted-foreground hidden sm:flex items-center gap-1">
             <Clock className="h-4 w-4" />
               Started {formatDistanceToNow(new Date(session.started_at), { addSuffix: true })}
           </span>
@@ -494,6 +503,16 @@ export default function SessionDetailPage() {
             <Eye className="h-3 w-3 mr-1" />
             {totalObservations} observations
           </Badge>
+          {/* Mobile Activity Panel Toggle */}
+          <Button
+            variant="outline"
+            size="sm"
+            className="lg:hidden ml-auto"
+            onClick={() => setIsMobileActivityOpen(true)}
+          >
+            <Activity className="h-4 w-4 mr-1" />
+            Activity
+          </Button>
         </div>
 
         {/* Process Map */}
@@ -517,8 +536,8 @@ export default function SessionDetailPage() {
         </div>
       </div>
 
-      {/* Side Panel */}
-      <div className="w-80 border-l bg-white flex flex-col">
+      {/* Side Panel - Desktop */}
+      <div className="hidden lg:flex w-80 border-l bg-white flex-col">
         {/* Participants */}
         <div className="p-4 border-b">
           <h3 className="font-medium mb-3 flex items-center gap-2">
@@ -592,6 +611,80 @@ export default function SessionDetailPage() {
           </ScrollArea>
         </div>
       </div>
+
+      {/* Side Panel - Mobile Sheet */}
+      <Sheet open={isMobileActivityOpen} onOpenChange={setIsMobileActivityOpen}>
+        <SheetContent side="bottom" className="h-[70vh] lg:hidden">
+          <SheetHeader>
+            <SheetTitle>Session Activity</SheetTitle>
+          </SheetHeader>
+          <div className="flex flex-col h-full mt-4">
+            {/* Participants */}
+            <div className="pb-4 border-b">
+              <h3 className="font-medium mb-3 flex items-center gap-2">
+                <Users className="h-4 w-4" />
+                Participants ({participants.length})
+              </h3>
+              <div className="flex flex-wrap gap-2">
+                {participants.map((participant) => (
+                  <div
+                    key={participant.id}
+                    className="flex items-center gap-2 p-2 rounded-lg bg-muted/50"
+                  >
+                    <div className="relative">
+                      <Avatar className="h-6 w-6">
+                        <AvatarFallback className="bg-brand-gold/20 text-brand-navy text-xs">
+                          {participant.user?.name?.charAt(0) || "?"}
+                        </AvatarFallback>
+                      </Avatar>
+                      {isParticipantActive(participant.last_active_at) && (
+                        <span className="absolute -bottom-0.5 -right-0.5 w-2 h-2 bg-brand-emerald rounded-full border border-white" />
+                      )}
+                    </div>
+                    <span className="text-sm">{participant.user?.name || "Unknown"}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Recent Activity */}
+            <div className="flex-1 overflow-hidden flex flex-col pt-4">
+              <h3 className="font-medium mb-3 flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4 text-orange-500" />
+                Recent Activity
+              </h3>
+              <ScrollArea className="flex-1">
+                <div className="space-y-3 pr-4">
+                  {recentActivity.length > 0 ? (
+                    recentActivity.map((activity) => (
+                    <div
+                      key={activity.id}
+                      className="p-3 rounded-lg bg-muted/50 space-y-1"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium">{activity.user}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {activity.time}
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                          Tagged{" "}
+                          <span className="text-orange-600">{activity.waste}</span> on{" "}
+                          <span className="font-medium">{activity.step}</span>
+                      </p>
+                    </div>
+                    ))
+                  ) : (
+                    <p className="text-sm text-muted-foreground text-center py-4">
+                      No activity yet. Click on a step to start tagging waste.
+                    </p>
+                  )}
+                </div>
+              </ScrollArea>
+            </div>
+          </div>
+        </SheetContent>
+      </Sheet>
 
       {/* Step Detail Panel */}
       <StepDetailPanel

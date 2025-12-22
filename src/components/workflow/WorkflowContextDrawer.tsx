@@ -572,7 +572,7 @@ export function WorkflowContextDrawer({
       <Sheet open={open} onOpenChange={onOpenChange}>
         <SheetContent
           side="right"
-          className="w-full sm:max-w-[480px] p-0 gap-0 flex flex-col"
+          className="w-full sm:max-w-[480px] max-w-[100vw] p-0 gap-0 flex flex-col overflow-y-auto"
         >
           {/* Header */}
           <div className="shrink-0 bg-gradient-to-r from-brand-navy to-brand-navy/90 text-white p-6">
