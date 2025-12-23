@@ -36,9 +36,10 @@ import {
   MessageSquare,
   MousePointer2,
 } from "lucide-react";
-import { useDesignStudio } from "./DesignStudioContext";
+// Note: useDesignStudio will be used when full context integration is ready
+// import { useDesignStudio } from "./DesignStudioContext";
 import type { StepType } from "@/types";
-import type { AnnotationType, LaneColor, FutureStateLane } from "@/types/design-studio";
+import type { AnnotationType, LaneColor, FutureStateLane, ActiveTool } from "@/types/design-studio";
 
 // ============================================
 // CONSTANTS
@@ -112,7 +113,8 @@ export function FutureStateToolbox({
   onAddLane,
   className,
 }: FutureStateToolboxProps) {
-  const { state, actions } = useDesignStudio();
+  // Local state for active tool (will be replaced by context when fully integrated)
+  const [activeTool, setActiveTool] = useState<ActiveTool | null>(null);
   const [stepsOpen, setStepsOpen] = useState(true);
   const [lanesOpen, setLanesOpen] = useState(true);
   const [annotationsOpen, setAnnotationsOpen] = useState(true);
@@ -126,7 +128,7 @@ export function FutureStateToolbox({
     e.dataTransfer.effectAllowed = "copy";
     
     // Set active tool for click-to-place mode
-    actions.setActiveTool({ type: "create_node", stepType });
+    setActiveTool({ type: "create_node", stepType });
   };
 
   // Handle drag start for annotation types
@@ -135,25 +137,25 @@ export function FutureStateToolbox({
     e.dataTransfer.effectAllowed = "copy";
     
     // Set active tool for click-to-place mode
-    actions.setActiveTool({ type: "create_annotation", annotationType });
+    setActiveTool({ type: "create_annotation", annotationType });
   };
 
   // Handle step tool click (for click-to-place mode)
   const handleStepClick = (stepType: StepType) => {
-    if (state.activeTool?.type === "create_node" && state.activeTool.stepType === stepType) {
+    if (activeTool?.type === "create_node" && activeTool.stepType === stepType) {
       // Deselect if clicking same tool
-      actions.setActiveTool(null);
+      setActiveTool(null);
     } else {
-      actions.setActiveTool({ type: "create_node", stepType });
+      setActiveTool({ type: "create_node", stepType });
     }
   };
 
   // Handle annotation tool click
   const handleAnnotationClick = (annotationType: AnnotationType) => {
-    if (state.activeTool?.type === "create_annotation" && state.activeTool.annotationType === annotationType) {
-      actions.setActiveTool(null);
+    if (activeTool?.type === "create_annotation" && activeTool.annotationType === annotationType) {
+      setActiveTool(null);
     } else {
-      actions.setActiveTool({ type: "create_annotation", annotationType });
+      setActiveTool({ type: "create_annotation", annotationType });
     }
   };
 
@@ -201,9 +203,9 @@ export function FutureStateToolbox({
                   size="icon"
                   className={cn(
                     "h-8 w-8",
-                    state.activeTool?.type === "select" && "bg-accent"
+                    activeTool?.type === "select" && "bg-accent"
                   )}
-                  onClick={() => actions.setActiveTool({ type: "select" })}
+                  onClick={() => setActiveTool({ type: "select" })}
                 >
                   <MousePointer2 className="h-4 w-4" />
                 </Button>
@@ -218,7 +220,7 @@ export function FutureStateToolbox({
                   size="icon"
                   className={cn(
                     "h-8 w-8",
-                    state.activeTool?.type === "create_node" && "bg-accent"
+                    activeTool?.type === "create_node" && "bg-accent"
                   )}
                 >
                   <Square className="h-4 w-4" />
@@ -243,7 +245,7 @@ export function FutureStateToolbox({
                   size="icon"
                   className={cn(
                     "h-8 w-8",
-                    state.activeTool?.type === "create_annotation" && "bg-accent"
+                    activeTool?.type === "create_annotation" && "bg-accent"
                   )}
                 >
                   <MessageSquare className="h-4 w-4" />
@@ -276,10 +278,10 @@ export function FutureStateToolbox({
       <div className="flex-1 overflow-y-auto p-2 space-y-2">
         {/* Select Tool */}
         <Button
-          variant={state.activeTool?.type === "select" || !state.activeTool ? "secondary" : "ghost"}
+          variant={activeTool?.type === "select" || !activeTool ? "secondary" : "ghost"}
           size="sm"
           className="w-full justify-start"
-          onClick={() => actions.setActiveTool({ type: "select" })}
+          onClick={() => setActiveTool({ type: "select" })}
         >
           <MousePointer2 className="h-4 w-4 mr-2" />
           Select
@@ -296,8 +298,8 @@ export function FutureStateToolbox({
           <CollapsibleContent className="pt-1 space-y-1">
             {STEP_TOOLS.map((tool) => {
               const Icon = tool.icon;
-              const isActive = state.activeTool?.type === "create_node" && 
-                               state.activeTool.stepType === tool.type;
+              const isActive = activeTool?.type === "create_node" && 
+                               activeTool.stepType === tool.type;
               
               return (
                 <TooltipProvider key={tool.type} delayDuration={300}>
@@ -437,8 +439,8 @@ export function FutureStateToolbox({
           <CollapsibleContent className="pt-1 space-y-1">
             {ANNOTATION_TOOLS.map((tool) => {
               const Icon = tool.icon;
-              const isActive = state.activeTool?.type === "create_annotation" && 
-                               state.activeTool.annotationType === tool.type;
+              const isActive = activeTool?.type === "create_annotation" && 
+                               activeTool.annotationType === tool.type;
               
               return (
                 <TooltipProvider key={tool.type} delayDuration={300}>
