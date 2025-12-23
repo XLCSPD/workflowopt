@@ -549,8 +549,9 @@ export function StepDesignPanel({
       </div>
 
       {/* Tabs */}
-      <Tabs value={selectedTab} onValueChange={setSelectedTab} className="flex-1 flex flex-col min-h-0 overflow-hidden">
-        <TabsList className="shrink-0 mx-4 mt-2 grid w-auto grid-cols-3">
+      <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+        <Tabs value={selectedTab} onValueChange={setSelectedTab} className="flex-1 flex flex-col min-h-0 overflow-hidden">
+          <TabsList className="shrink-0 mx-4 mt-2 grid w-auto grid-cols-3">
           <TabsTrigger value="options" className="text-xs">
             Options
             {state.options.length > 0 && (
@@ -833,7 +834,8 @@ export function StepDesignPanel({
             </div>
           )}
         </TabsContent>
-      </Tabs>
+        </Tabs>
+      </div>
     </div>
   );
 }
