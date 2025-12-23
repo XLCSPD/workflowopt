@@ -8,22 +8,17 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   ArrowLeft,
   ArrowRight,
   CheckCircle2,
-  Circle,
   Rocket,
   GraduationCap,
   GitBranch,
   Users,
   Sparkles,
   BookOpen,
-  Play,
   Eye,
-  MousePointer,
-  MessageSquare,
   Target,
   Zap,
   Clock,

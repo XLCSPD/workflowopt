@@ -19,9 +19,7 @@ import {
   BarChart3,
   Settings,
   HelpCircle,
-  ChevronRight,
   Search,
-  ExternalLink,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 
