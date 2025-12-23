@@ -62,6 +62,7 @@ import type {
   StepDesignStatus,
   ObservationWithWasteTypes,
   WasteType,
+  NodeAction,
 } from "@/types";
 import type { useRealtimeStudio } from "@/lib/hooks/useRealtimeStudio";
 
@@ -247,7 +248,10 @@ export function FutureStateDesigner({
     } finally {
       setLoading(false);
     }
-  }, [sessionId, processId, supabase, selectedFutureState]);
+  // Note: selectedFutureState intentionally excluded from deps to prevent infinite loop
+  // fetchFutureStateGraph sets selectedFutureState, which would recreate fetchData and cause loop
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId, processId, supabase]);
 
   // Fetch single future state with graph
   const fetchFutureStateGraph = async (futureStateId: string) => {
@@ -586,6 +590,72 @@ export function FutureStateDesigner({
     }
   };
 
+  // Handle updating a node (name, action, etc.)
+  const handleUpdateNode = async (nodeId: string, updates: { name?: string; action?: NodeAction }) => {
+    try {
+      const response = await fetch("/api/future-state/nodes", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nodeId, updates }),
+      });
+      if (response.ok) {
+        if (selectedFutureState) {
+          await fetchFutureStateGraph(selectedFutureState.id);
+        }
+        toast({ title: "Step Updated", description: "Step updated successfully." });
+      }
+    } catch (error) {
+      console.error("Error updating node:", error);
+    }
+  };
+
+  // Handle deleting a node
+  const handleDeleteNode = async (nodeId: string) => {
+    try {
+      const response = await fetch("/api/future-state/nodes", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nodeId, cascade: true }),
+      });
+      if (response.ok) {
+        if (selectedFutureState) {
+          await fetchFutureStateGraph(selectedFutureState.id);
+        }
+        toast({ title: "Step Deleted", description: "Step removed from the design." });
+      }
+    } catch (error) {
+      console.error("Error deleting node:", error);
+    }
+  };
+
+  // Handle duplicating a node
+  const handleDuplicateNode = async (nodeId: string) => {
+    const node = selectedFutureState?.nodes.find(n => n.id === nodeId);
+    if (!node || !selectedFutureState) return;
+
+    try {
+      const response = await fetch("/api/future-state/nodes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          futureStateId: selectedFutureState.id,
+          name: `${node.name} (copy)`,
+          lane: node.lane,
+          stepType: node.step_type,
+          positionX: node.position_x + 50,
+          positionY: node.position_y + 50,
+          action: node.action,
+        }),
+      });
+      if (response.ok) {
+        await fetchFutureStateGraph(selectedFutureState.id);
+        toast({ title: "Step Duplicated", description: "A copy of the step has been created." });
+      }
+    } catch (error) {
+      console.error("Error duplicating node:", error);
+    }
+  };
+
   // Handle saving as a new version
   const handleSaveAsNewVersion = async (name: string, description?: string): Promise<string | null> => {
     if (!selectedFutureState) return null;
@@ -839,6 +909,9 @@ export function FutureStateDesigner({
                     // Edit mode props
                     isEditMode={isEditMode}
                     onCreateNode={handleCreateNode}
+                    onUpdateNode={handleUpdateNode}
+                    onDeleteNode={handleDeleteNode}
+                    onDuplicateNode={handleDuplicateNode}
                     onNodePositionChange={handleNodePositionChange}
                     onCreateEdge={handleCreateEdge}
                     onDeleteEdge={handleDeleteEdge}

@@ -49,6 +49,7 @@ import type {
   ObservationWithWasteTypes,
   StepDesignStatus,
   SolutionCard,
+  NodeAction,
 } from "@/types";
 import "reactflow/dist/style.css";
 import { STEP_TOOLBOX_MIME, ANNOTATION_TOOLBOX_MIME } from "./FutureStateToolbox";
@@ -72,7 +73,9 @@ interface HorizontalFlowViewProps {
   onNodeSelect?: (nodeId: string, addToSelection?: boolean) => void;
   onNodePositionChange?: (nodeId: string, position: { x: number; y: number }) => void;
   onCreateNode?: (lane: string, position: { x: number; y: number }, stepType?: string) => void;
-  onDeleteNode?: (nodeId: string) => void; // Will be used with context menu
+  onUpdateNode?: (nodeId: string, updates: { name?: string; action?: NodeAction }) => void;
+  onDeleteNode?: (nodeId: string) => void;
+  onDuplicateNode?: (nodeId: string) => void;
   onCreateEdge?: (sourceId: string, targetId: string) => void;
   onDeleteEdge?: (edgeId: string) => void;
 }
@@ -349,14 +352,28 @@ function HorizontalFlowViewInner({
   onNodePositionChange,
   onCreateNode,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  onUpdateNode,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   onDeleteNode,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  onDuplicateNode,
   onCreateEdge,
   onDeleteEdge,
 }: HorizontalFlowViewProps) {
   const [viewState, setViewState] = useState<"current" | "future">("future");
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
-  const [laneList, setLaneList] = useState<string[]>([]);
+
+  // Calculate lanes from source data (memoized to avoid state update loops)
+  const laneList = useMemo(() => {
+    const laneSet = new Set<string>();
+    if (viewState === "future") {
+      futureStateNodes.forEach((n) => laneSet.add(n.lane));
+    } else {
+      currentSteps.forEach((s) => laneSet.add(s.lane));
+    }
+    return Array.from(laneSet);
+  }, [viewState, futureStateNodes, currentSteps]);
 
   // Group observations by step
   const observationsByStep = useMemo(() => {
@@ -440,20 +457,9 @@ function HorizontalFlowViewInner({
     const flowNodes: Node<any>[] = [];
     let flowEdges: Edge[] = [];
 
-    // Get unique lanes and create lane position mapping
-    const laneSet = new Set<string>();
-    
-    if (viewState === "future") {
-      futureStateNodes.forEach((n) => laneSet.add(n.lane));
-    } else {
-      currentSteps.forEach((s) => laneSet.add(s.lane));
-    }
-    const lanes = Array.from(laneSet);
-    setLaneList(lanes);
-
-    // Create lane Y positions (labels are now fixed position elements)
+    // Create lane Y positions using the memoized laneList
     const laneYPositions = new Map<string, number>();
-    lanes.forEach((lane, index) => {
+    laneList.forEach((lane, index) => {
       const laneY = index * (LANE_HEIGHT + LANE_GAP);
       laneYPositions.set(lane, laneY);
     });
@@ -599,6 +605,8 @@ function HorizontalFlowViewInner({
     getStepPriorityScore,
     observationsByStep,
     highlightedNodeId,
+    laneList,
+    getLinkedSolution,
     setNodes,
     setEdges,
     fitView,
