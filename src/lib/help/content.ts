@@ -470,6 +470,316 @@ After completing a session, review the findings.
     ],
   },
   {
+    id: "future-state",
+    title: "Future State Studio",
+    icon: "sparkles",
+    topics: [
+      {
+        id: "future-state-overview",
+        title: "Future State Studio Overview",
+        description: "AI-powered process optimization workspace",
+        content: `
+## Future State Studio
+
+Transform waste observations into optimized processes with AI assistance.
+
+### The 6-Stage Pipeline
+1. **Synthesis** - AI clusters observations into themes
+2. **Solutions** - AI generates improvement recommendations
+3. **Sequencing** - Group solutions into implementation waves
+4. **Designer** - Visual future state process map
+5. **Compare** - Side-by-side current vs. future
+6. **Export** - Download deliverables
+
+### Getting Started
+1. Complete a waste walk session first
+2. Go to **Future State** in sidebar
+3. Select a session with observations
+4. Work through each stage sequentially
+
+### AI Assistance
+Each stage uses AI agents that consider:
+- Your observations and themes
+- Workflow context (purpose, constraints)
+- Industry best practices
+- Implementation feasibility
+        `,
+        keywords: ["future state", "studio", "ai", "optimize", "improvement", "pipeline"],
+        relatedTopics: ["synthesis", "solutions", "designer", "step-design"],
+      },
+      {
+        id: "synthesis",
+        title: "Synthesis Hub",
+        description: "AI-powered observation clustering",
+        content: `
+## Synthesis Hub
+
+The first stage where AI analyzes and groups your observations.
+
+### How It Works
+1. Click **"Run Agent"** to start analysis
+2. AI groups similar observations into themes
+3. Each theme has a root cause identified
+4. Review and approve themes
+
+### Themes Include
+- **Title** - Descriptive name
+- **Root Cause** - Why this waste occurs
+- **Linked Observations** - Related findings
+- **Impact Assessment** - Severity rating
+
+### Tips
+- Review each theme carefully
+- Merge similar themes if needed
+- Add manual themes for missed patterns
+- Approve to proceed to Solutions
+        `,
+        keywords: ["synthesis", "theme", "cluster", "group", "analyze", "root cause"],
+        relatedTopics: ["future-state-overview", "solutions"],
+      },
+      {
+        id: "solutions",
+        title: "Solution Builder",
+        description: "AI-generated improvement recommendations",
+        content: `
+## Solution Builder
+
+Stage 2 generates actionable improvement solutions.
+
+### Solution Categories
+- 🔴 **Eliminate** - Remove wasteful steps entirely
+- 🟡 **Modify** - Improve existing processes
+- 🟢 **Create** - Add new capabilities
+
+### Each Solution Includes
+- Clear title and description
+- Expected impact (time/cost savings)
+- Implementation effort estimate
+- Linked themes it addresses
+- Affected process steps
+
+### Actions
+- **Accept** - Approve for implementation planning
+- **Reject** - Mark as not viable
+- **Edit** - Customize the recommendation
+- **Regenerate** - Get new suggestions
+
+### Tips
+- Consider quick wins first
+- Balance effort vs. impact
+- Think about dependencies
+- Involve stakeholders in review
+        `,
+        keywords: ["solution", "recommendation", "eliminate", "modify", "create", "improvement"],
+        relatedTopics: ["synthesis", "sequencing", "future-state-overview"],
+      },
+      {
+        id: "sequencing",
+        title: "Roadmap Builder",
+        description: "Organize solutions into implementation waves",
+        content: `
+## Roadmap Builder
+
+Stage 3 groups solutions into timed implementation phases.
+
+### Waves (Horizons)
+- **Wave 1** - Quick wins (0-3 months)
+- **Wave 2** - Medium-term (3-6 months)
+- **Wave 3** - Long-term (6-12 months)
+
+### AI Sequencing
+The AI considers:
+- Dependencies between solutions
+- Resource requirements
+- Risk levels
+- Change management needs
+
+### How to Use
+1. Run the sequencing agent
+2. Review wave assignments
+3. Drag solutions between waves
+4. Adjust timing as needed
+5. Finalize the roadmap
+
+### Tips
+- Start with high-impact, low-effort
+- Don't overload Wave 1
+- Consider organizational readiness
+- Plan for change management
+        `,
+        keywords: ["sequencing", "roadmap", "wave", "timeline", "implementation", "planning"],
+        relatedTopics: ["solutions", "designer", "future-state-overview"],
+      },
+      {
+        id: "designer",
+        title: "Future State Designer",
+        description: "Visual future state process design",
+        content: `
+## Future State Designer
+
+Stage 4 creates the optimized process visualization.
+
+### The Canvas
+- Visual map based on current workflow
+- Steps marked with planned changes
+- Color-coded by action type:
+  - Red = Eliminate
+  - Yellow = Modify  
+  - Green = Create
+  - Blue = Unchanged
+
+### Working with Steps
+1. Click any step to open the design panel
+2. Use **Step Design Assist** for AI help
+3. Review and customize the design
+4. Mark as complete when done
+
+### Node Status Badges
+- 🔵 Not Started
+- 🟡 In Progress
+- 🟢 Complete
+
+### Tips
+- Work systematically through the map
+- Use the Solution Tracker sidebar
+- Check cross-lane dependencies
+- Validate with process owners
+        `,
+        keywords: ["designer", "canvas", "map", "visual", "process", "steps"],
+        relatedTopics: ["step-design", "compare", "future-state-overview"],
+      },
+      {
+        id: "step-design",
+        title: "Step Design Assist",
+        description: "AI-powered step-level design help",
+        content: `
+## Step Design Assist
+
+Get detailed AI help for designing each process step.
+
+### Opening the Panel
+1. Click any step in the Designer canvas
+2. The side panel opens automatically
+3. See linked solutions and current status
+
+### Panel Tabs
+
+**Options Tab**
+- Click "Generate" to get 2-3 design alternatives
+- Each option includes:
+  - Purpose and description
+  - Inputs and outputs
+  - Actions/activities
+  - Controls (approvals, validations)
+  - Timing estimates
+  - Waste addressed
+  - Risks and mitigations
+  - Confidence score
+
+**Context Tab**
+- Answer AI questions for better results
+- Chat with the AI for clarification
+- View current assumptions
+
+**History Tab**
+- See previous design versions
+- Compare iterations
+- Revert if needed
+
+### Workflow
+1. Generate options
+2. Review alternatives
+3. Select the best fit
+4. Customize if needed
+5. Accept to finalize
+
+### Tips
+- Provide context via the chat
+- Consider all options before choosing
+- Check the confidence score
+- Review risks carefully
+        `,
+        keywords: ["step design", "assist", "ai", "options", "generate", "panel", "design"],
+        relatedTopics: ["designer", "future-state-overview"],
+      },
+      {
+        id: "compare",
+        title: "Compare View",
+        description: "Side-by-side current vs. future state",
+        content: `
+## Compare View
+
+Stage 5 shows current and future processes side-by-side.
+
+### What You'll See
+- Left: Current state workflow
+- Right: Future state workflow
+- Highlighted differences
+- Impact summary
+
+### Metrics Comparison
+- Total step count
+- Cycle time estimates
+- Waste categories addressed
+- Automation opportunities
+
+### Using Compare
+1. Review visual differences
+2. Check the impact summary
+3. Validate with stakeholders
+4. Export for presentations
+
+### Tips
+- Use for stakeholder sign-off
+- Highlight key improvements
+- Note any trade-offs
+- Document assumptions
+        `,
+        keywords: ["compare", "side by side", "current", "future", "difference"],
+        relatedTopics: ["designer", "export", "future-state-overview"],
+      },
+      {
+        id: "export",
+        title: "Export Deliverables",
+        description: "Download reports and documentation",
+        content: `
+## Export Deliverables
+
+Stage 6 generates professional documentation.
+
+### Available Exports
+- **Summary Report (PDF)** - Executive overview
+- **Presentation (PPTX)** - Stakeholder deck
+- **Process Maps (PNG/SVG)** - Visual diagrams
+- **Data Export (CSV)** - Raw data for analysis
+
+### Report Contents
+- Executive summary
+- Current state analysis
+- Identified themes and solutions
+- Implementation roadmap
+- Future state design
+- Expected benefits
+
+### How to Export
+1. Complete previous stages
+2. Go to Export tab
+3. Select format
+4. Click "Generate"
+5. Download when ready
+
+### Tips
+- Complete all stages first
+- Review before sharing
+- Customize for audience
+- Save copies locally
+        `,
+        keywords: ["export", "report", "pdf", "presentation", "download", "deliverable"],
+        relatedTopics: ["compare", "future-state-overview"],
+      },
+    ],
+  },
+  {
     id: "analytics",
     title: "Analytics",
     icon: "bar-chart",
@@ -794,6 +1104,16 @@ export const pageHelp: Record<string, PageHelp> = {
       { label: "Compare Sessions", href: "/analytics/compare", description: "Side-by-side comparison" },
     ],
     featuredTopics: ["analytics-overview", "charts", "hotspots", "insights"],
+  },
+  "future-state": {
+    pageId: "future-state",
+    title: "Future State Studio Help",
+    description: "AI-powered process optimization",
+    quickActions: [
+      { label: "User Guide", href: "/docs", description: "Full documentation" },
+      { label: "Quick Start", href: "/docs/quick-start", description: "Get started in 5 minutes" },
+    ],
+    featuredTopics: ["future-state-overview", "synthesis", "solutions", "designer", "step-design"],
   },
   settings: {
     pageId: "settings",

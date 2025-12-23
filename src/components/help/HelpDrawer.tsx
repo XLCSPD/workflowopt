@@ -35,6 +35,7 @@ import {
   ChevronLeft,
   BookOpen,
   ExternalLink,
+  Sparkles,
 } from "lucide-react";
 import {
   helpSections,
@@ -164,6 +165,7 @@ const sectionIcons: Record<string, React.ElementType> = {
   training: GraduationCap,
   workflows: GitBranch,
   sessions: Users,
+  "future-state": Sparkles,
   analytics: BarChart3,
   settings: Settings,
   admin: Shield,

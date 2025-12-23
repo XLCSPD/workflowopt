@@ -522,7 +522,7 @@ export function StepDesignPanel({
   );
 
   return (
-    <div className="flex flex-col h-full" style={{ height: '100%', maxHeight: '100vh' }}>
+    <div className="h-full flex flex-col overflow-hidden">
       {/* Header - No close button here, Sheet provides one */}
       <div className="shrink-0 p-4 pb-3 border-b bg-white">
         <div className="pr-8"> {/* Leave space for Sheet's close button */}
@@ -549,8 +549,8 @@ export function StepDesignPanel({
       </div>
 
       {/* Tabs */}
-      <div className="flex-1 flex flex-col overflow-hidden" style={{ minHeight: 0 }}>
-        <Tabs value={selectedTab} onValueChange={setSelectedTab} className="h-full flex flex-col" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+        <Tabs value={selectedTab} onValueChange={setSelectedTab} className="flex-1 min-h-0 flex flex-col">
           <TabsList className="shrink-0 mx-4 mt-2 grid w-auto grid-cols-3">
           <TabsTrigger value="options" className="text-xs">
             Options
@@ -574,7 +574,7 @@ export function StepDesignPanel({
         </TabsList>
 
         {/* Options Tab */}
-        <TabsContent value="options" className="overflow-y-auto p-4 pt-3 space-y-3 m-0" style={{ flex: 1, minHeight: 0 }}>
+        <TabsContent value="options" className="flex-1 overflow-y-auto p-4 pt-3 space-y-3 m-0 min-h-0">
           {/* Chat Prompt for Pending Questions */}
           {pendingQuestions.length > 0 && state.node.step_design_status !== "step_design_complete" && (
             <motion.button
@@ -695,7 +695,7 @@ export function StepDesignPanel({
         </TabsContent>
 
         {/* Context Tab */}
-        <TabsContent value="context" className="flex-1 flex flex-col min-h-0 m-0">
+        <TabsContent value="context" className="flex-1 flex flex-col min-h-0 m-0 overflow-hidden">
           {/* Chat Mode - Full Height */}
           {showChat && pendingQuestions.length > 0 ? (
             <div className="flex-1 flex flex-col min-h-0">
