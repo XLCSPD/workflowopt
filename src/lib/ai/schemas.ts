@@ -175,8 +175,14 @@ export const StepDesignOutputSchema = z.object({
 });
 
 // Step Design Control schema
+// Note: Transform unknown control types to "other" to handle AI variations
+const ControlTypeSchema = z.string().transform((val) => {
+  const validTypes = ["approval", "validation", "audit", "compliance", "other"];
+  return validTypes.includes(val.toLowerCase()) ? val.toLowerCase() : "other";
+}) as unknown as z.ZodType<"approval" | "validation" | "audit" | "compliance" | "other">;
+
 export const StepDesignControlSchema = z.object({
-  type: z.enum(["approval", "validation", "audit", "compliance", "other"]),
+  type: ControlTypeSchema,
   description: z.string(),
   owner: z.string().optional(),
   frequency: z.string().optional(),
