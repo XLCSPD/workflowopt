@@ -21,12 +21,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+// Tooltips removed to fix infinite loop issue with Radix compose-refs
+// Using native title attribute instead
 import {
   Eye,
   Layers,
@@ -361,6 +357,7 @@ function HorizontalFlowViewInner({
   onCreateEdge,
   onDeleteEdge,
 }: HorizontalFlowViewProps) {
+  console.log("[HorizontalFlowView] Rendering, futureStateNodes:", futureStateNodes.length);
   const [viewState, setViewState] = useState<"current" | "future">("future");
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
@@ -376,6 +373,17 @@ function HorizontalFlowViewInner({
   // Editing state for inline rename
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState("");
+
+  // Track if we've initialized the nodes to prevent infinite loops
+  const prevDataSignatureRef = useRef<string>("");
+  
+  // Store callback refs to avoid triggering useEffect when callbacks change
+  const callbacksRef = useRef({
+    getStepWasteTypes: (stepId: string): WasteType[] => [],
+    getStepPriorityScore: (stepId: string): number => 0,
+    getLinkedSolution: (solutionId: string | null | undefined) => null as SolutionCard | null | undefined,
+    fitView: (options?: { padding?: number; duration?: number }) => {},
+  });
 
   // Calculate lanes from source data (memoized to avoid state update loops)
   const laneList = useMemo(() => {
@@ -418,6 +426,12 @@ function HorizontalFlowViewInner({
   }, [observationsByStep]);
 
   const { fitView, zoomIn, zoomOut, screenToFlowPosition } = useReactFlow();
+  
+  // Update callback refs (this doesn't trigger re-renders)
+  callbacksRef.current.getStepWasteTypes = getStepWasteTypes;
+  callbacksRef.current.getStepPriorityScore = getStepPriorityScore;
+  callbacksRef.current.getLinkedSolution = getLinkedSolution || (() => null);
+  callbacksRef.current.fitView = fitView;
   const viewport = useViewport();
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -466,6 +480,22 @@ function HorizontalFlowViewInner({
 
   // Build nodes and edges based on view state
   useEffect(() => {
+    // Create a signature of the current data to detect actual changes
+    const dataSignature = JSON.stringify({
+      viewState,
+      futureNodeIds: futureStateNodes.map(n => `${n.id}:${n.name}:${n.action}`),
+      futureEdgeIds: futureStateEdges.map(e => e.id),
+      currentStepIds: currentSteps.map(s => s.id),
+      connectionCount: stepConnections.length,
+      highlightedNodeId,
+    });
+
+    // Skip if data hasn't actually changed (prevents infinite loops from callback reference changes)
+    if (prevDataSignatureRef.current === dataSignature) {
+      return;
+    }
+    prevDataSignatureRef.current = dataSignature;
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const flowNodes: Node<any>[] = [];
     let flowEdges: Edge[] = [];
@@ -494,8 +524,8 @@ function HorizontalFlowViewInner({
         const indexInLane = laneNodes.findIndex((n) => n.id === node.id);
         const laneY = laneYPositions.get(node.lane) || 0;
         
-        // Get linked solution name
-        const linkedSolution = getLinkedSolution?.(node.linked_solution_id);
+        // Get linked solution name (using ref to avoid dependency issues)
+        const linkedSolution = callbacksRef.current.getLinkedSolution(node.linked_solution_id);
         const linkedSolutionName = linkedSolution?.title;
 
         flowNodes.push({
@@ -509,11 +539,11 @@ function HorizontalFlowViewInner({
             label: node.name,
             lane: node.lane,
             action: node.action as "keep" | "modify" | "remove" | "new",
-            wasteTypes: node.source_step_id ? getStepWasteTypes(node.source_step_id) : [],
+            wasteTypes: node.source_step_id ? callbacksRef.current.getStepWasteTypes(node.source_step_id) : [],
             observationCount: node.source_step_id 
               ? (observationsByStep.get(node.source_step_id)?.length || 0) 
               : 0,
-            priorityScore: node.source_step_id ? getStepPriorityScore(node.source_step_id) : 0,
+            priorityScore: node.source_step_id ? callbacksRef.current.getStepPriorityScore(node.source_step_id) : 0,
             designStatus: node.step_design_status,
             isFutureState: true,
             sourceStepId: node.source_step_id,
@@ -568,9 +598,9 @@ function HorizontalFlowViewInner({
             label: step.step_name,
             lane: step.lane,
             action: "keep" as const,
-            wasteTypes: getStepWasteTypes(step.id),
+            wasteTypes: callbacksRef.current.getStepWasteTypes(step.id),
             observationCount: observationsByStep.get(step.id)?.length || 0,
-            priorityScore: getStepPriorityScore(step.id),
+            priorityScore: callbacksRef.current.getStepPriorityScore(step.id),
             isFutureState: false,
             description: step.description || undefined,
           },
@@ -606,23 +636,23 @@ function HorizontalFlowViewInner({
     
     // Fit view after a short delay to allow React Flow to render
     setTimeout(() => {
-      fitView({ padding: 0.15, duration: 300 });
+      callbacksRef.current.fitView({ padding: 0.15, duration: 300 });
     }, 100);
+  // Note: We use callbacksRef for getStepWasteTypes, getStepPriorityScore, getLinkedSolution
+  // to avoid infinite loops caused by callback reference changes.
+  // The data signature check prevents unnecessary updates when data hasn't changed.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     viewState,
     futureStateNodes,
     futureStateEdges,
     currentSteps,
     stepConnections,
-    getStepWasteTypes,
-    getStepPriorityScore,
     observationsByStep,
     highlightedNodeId,
     laneList,
-    getLinkedSolution,
     setNodes,
     setEdges,
-    fitView,
   ]);
 
   // Handle node context menu (right-click)
@@ -907,49 +937,35 @@ function HorizontalFlowViewInner({
               Auto Layout
             </Button>
 
-            {/* View Controls */}
+            {/* View Controls - Simplified without Tooltips to fix infinite loop */}
             <div className="flex items-center bg-white rounded-md border shadow-sm">
-              <TooltipProvider delayDuration={100}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => zoomIn()}
-                      className="h-9 px-2.5 rounded-r-none border-r"
-                    >
-                      <ZoomIn className="h-4 w-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">Zoom In</TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => zoomOut()}
-                      className="h-9 px-2.5 rounded-none border-r"
-                    >
-                      <ZoomOut className="h-4 w-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">Zoom Out</TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => fitView({ padding: 0.15, duration: 300 })}
-                      className="h-9 px-2.5 rounded-l-none"
-                    >
-                      <Maximize2 className="h-4 w-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">Fit View</TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => zoomIn()}
+                className="h-9 px-2.5 rounded-r-none border-r"
+                title="Zoom In"
+              >
+                <ZoomIn className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => zoomOut()}
+                className="h-9 px-2.5 rounded-none border-r"
+                title="Zoom Out"
+              >
+                <ZoomOut className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => fitView({ padding: 0.15, duration: 300 })}
+                className="h-9 px-2.5 rounded-l-none"
+                title="Fit View"
+              >
+                <Maximize2 className="h-4 w-4" />
+              </Button>
             </div>
           </div>
 

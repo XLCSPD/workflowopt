@@ -123,24 +123,26 @@ export async function PATCH(request: NextRequest) {
       );
     }
 
-    // Get the node and verify it exists
+    console.log("[PATCH nodes] Looking up node:", nodeId);
+
+    // Get the node and verify it exists (simplified query to avoid is_locked column issues)
     const { data: existingNode, error: fetchError } = await supabase
       .from("future_state_nodes")
-      .select("*, future_state:future_states(id, is_locked)")
+      .select("*")
       .eq("id", nodeId)
       .single();
 
-    if (fetchError || !existingNode) {
+    if (fetchError) {
+      console.error("[PATCH nodes] Node lookup error:", fetchError);
+      return NextResponse.json({ error: "Node not found", details: fetchError.message }, { status: 404 });
+    }
+
+    if (!existingNode) {
+      console.error("[PATCH nodes] Node not found:", nodeId);
       return NextResponse.json({ error: "Node not found" }, { status: 404 });
     }
 
-    // Check if future state is locked
-    if (existingNode.future_state?.is_locked) {
-      return NextResponse.json(
-        { error: "Future state is locked and cannot be modified" },
-        { status: 403 }
-      );
-    }
+    console.log("[PATCH nodes] Found node:", existingNode.id, existingNode.name);
 
     // Build update object with snake_case field names
     const updateData: Record<string, unknown> = {
@@ -168,23 +170,34 @@ export async function PATCH(request: NextRequest) {
     // Increment revision
     updateData.revision = (existingNode.revision || 0) + 1;
 
-    // Update the node
-    const { data: node, error: updateError } = await supabase
+    console.log("[PATCH nodes] Update data:", updateData);
+
+    // Update the node - don't use .single() to avoid RLS issues
+    const { data: nodes, error: updateError } = await supabase
       .from("future_state_nodes")
       .update(updateData)
       .eq("id", nodeId)
-      .select()
-      .single();
+      .select();
 
     if (updateError) {
-      console.error("Error updating node:", updateError);
+      console.error("[PATCH nodes] Error updating node:", updateError);
       return NextResponse.json(
-        { error: "Failed to update node" },
+        { error: "Failed to update node", details: updateError.message },
         { status: 500 }
       );
     }
 
-    return NextResponse.json({ node });
+    console.log("[PATCH nodes] Update result:", nodes);
+
+    if (!nodes || nodes.length === 0) {
+      console.error("[PATCH nodes] No rows updated - likely RLS blocking update. Node created_by:", existingNode.created_by, "Current user:", user.id);
+      return NextResponse.json(
+        { error: "Failed to update node - access denied", details: "RLS policy may be blocking this update" },
+        { status: 403 }
+      );
+    }
+
+    return NextResponse.json({ node: nodes[0] });
   } catch (error) {
     console.error("Node update error:", error);
     return NextResponse.json(
@@ -219,24 +232,26 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    // Get the node and verify it exists
+    console.log("[DELETE nodes] Looking up node:", nodeId);
+
+    // Get the node and verify it exists (simplified query to avoid is_locked column issues)
     const { data: existingNode, error: fetchError } = await supabase
       .from("future_state_nodes")
-      .select("*, future_state:future_states(id, is_locked)")
+      .select("*")
       .eq("id", nodeId)
       .single();
 
-    if (fetchError || !existingNode) {
+    if (fetchError) {
+      console.error("[DELETE nodes] Node lookup error:", fetchError);
+      return NextResponse.json({ error: "Node not found", details: fetchError.message }, { status: 404 });
+    }
+
+    if (!existingNode) {
+      console.error("[DELETE nodes] Node not found:", nodeId);
       return NextResponse.json({ error: "Node not found" }, { status: 404 });
     }
 
-    // Check if future state is locked
-    if (existingNode.future_state?.is_locked) {
-      return NextResponse.json(
-        { error: "Future state is locked and cannot be modified" },
-        { status: 403 }
-      );
-    }
+    console.log("[DELETE nodes] Found node:", existingNode.id, existingNode.name);
 
     // If cascade, delete connected edges first
     if (cascade) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { getSupabaseClient } from "@/lib/supabase/client";
 import { StageLanding } from "./StudioShell";
@@ -97,6 +97,7 @@ export function FutureStateDesigner({
   userId = "",
   realtimeStudio: _realtimeStudio,
 }: FutureStateDesignerProps) {
+  console.log("[FutureStateDesigner] Rendering");
   const router = useRouter();
   const [futureStates, setFutureStates] = useState<FutureState[]>([]);
   const [selectedFutureState, setSelectedFutureState] = useState<FutureStateWithGraph | null>(null);
@@ -120,6 +121,10 @@ export function FutureStateDesigner({
   // Annotations state - will be used for displaying annotations in future phases
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [annotations, setAnnotations] = useState<FutureStateAnnotation[]>([]);
+
+  // Ref to access selectedFutureState in callbacks without triggering re-creation
+  const selectedFutureStateRef = useRef<FutureStateWithGraph | null>(null);
+  selectedFutureStateRef.current = selectedFutureState;
 
   // Detect mobile viewport
   useEffect(() => {
@@ -434,24 +439,24 @@ export function FutureStateDesigner({
       .filter(Boolean);
   }, [selectedFutureState]);
 
-  // Get linked solution for a node
-  const getLinkedSolution = (solutionId: string | null | undefined) => {
+  // Get linked solution for a node (memoized to prevent infinite loops)
+  const getLinkedSolution = useCallback((solutionId: string | null | undefined) => {
     if (!solutionId) return null;
     return acceptedSolutions.find((s) => s.id === solutionId);
-  };
+  }, [acceptedSolutions]);
 
-  // Handle opening step design panel
-  const handleOpenStepDesign = (nodeId: string) => {
+  // Handle opening step design panel (memoized to prevent infinite loops)
+  const handleOpenStepDesign = useCallback((nodeId: string) => {
     setSelectedNodeId(nodeId);
     setStepDesignPanelOpen(true);
-  };
+  }, []);
 
-  // Handle clicking on a step in the context panel
-  const handleContextStepClick = (stepId: string) => {
+  // Handle clicking on a step in the context panel (memoized)
+  const handleContextStepClick = useCallback((stepId: string) => {
     setHighlightedStepId(stepId);
     // Clear highlight after 2 seconds
     setTimeout(() => setHighlightedStepId(null), 2000);
-  };
+  }, []);
 
   // Handle node update (refresh the graph)
   const handleNodeUpdated = async () => {
@@ -465,16 +470,17 @@ export function FutureStateDesigner({
     return node.action === "modify" || node.action === "new";
   };
 
-  // Handle adding a lane from the toolbox
-  const handleAddLane = async (name: string, color: LaneColor) => {
-    if (!selectedFutureState) return;
+  // Handle adding a lane from the toolbox (memoized)
+  const handleAddLane = useCallback(async (name: string, color: LaneColor) => {
+    const futureState = selectedFutureStateRef.current;
+    if (!futureState) return;
 
     try {
       const response = await fetch("/api/future-state/lanes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          futureStateId: selectedFutureState.id,
+          futureStateId: futureState.id,
           name,
           color,
         }),
@@ -491,18 +497,19 @@ export function FutureStateDesigner({
     } catch (error) {
       console.error("Error adding lane:", error);
     }
-  };
+  }, [toast]);
 
-  // Handle creating a node from the toolbox
-  const handleCreateNode = async (lane: string, position: { x: number; y: number }, stepType = "action") => {
-    if (!selectedFutureState) return;
+  // Handle creating a node from the toolbox (memoized)
+  const handleCreateNode = useCallback(async (lane: string, position: { x: number; y: number }, stepType = "action") => {
+    const futureState = selectedFutureStateRef.current;
+    if (!futureState) return;
 
     try {
       const response = await fetch("/api/future-state/nodes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          futureStateId: selectedFutureState.id,
+          futureStateId: futureState.id,
           name: "New Step",
           lane,
           stepType,
@@ -513,7 +520,7 @@ export function FutureStateDesigner({
       });
 
       if (response.ok) {
-        await fetchFutureStateGraph(selectedFutureState.id);
+        await fetchFutureStateGraph(futureState.id);
         toast({
           title: "Step Added",
           description: "New step created. Click to edit.",
@@ -522,10 +529,10 @@ export function FutureStateDesigner({
     } catch (error) {
       console.error("Error creating node:", error);
     }
-  };
+  }, [toast]);
 
-  // Handle updating node position
-  const handleNodePositionChange = async (nodeId: string, position: { x: number; y: number }) => {
+  // Handle updating node position (memoized)
+  const handleNodePositionChange = useCallback(async (nodeId: string, position: { x: number; y: number }) => {
     try {
       await fetch("/api/future-state/nodes", {
         method: "PATCH",
@@ -538,37 +545,43 @@ export function FutureStateDesigner({
     } catch (error) {
       console.error("Error updating node position:", error);
     }
-  };
+  }, []);
 
-  // Handle creating an edge
-  const handleCreateEdge = async (sourceId: string, targetId: string) => {
-    if (!selectedFutureState) return;
+  // Handle creating an edge (memoized)
+  const handleCreateEdge = useCallback(async (sourceId: string, targetId: string) => {
+    const futureState = selectedFutureStateRef.current;
+    if (!futureState) return;
 
     try {
       const response = await fetch("/api/future-state/edges", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          futureStateId: selectedFutureState.id,
+          futureStateId: futureState.id,
           sourceNodeId: sourceId,
           targetNodeId: targetId,
         }),
       });
 
+      const data = await response.json();
       if (response.ok) {
-        await fetchFutureStateGraph(selectedFutureState.id);
+        await fetchFutureStateGraph(futureState.id);
         toast({
           title: "Connection Added",
           description: "Steps connected.",
         });
+      } else {
+        console.error("Error creating edge:", data);
+        toast({ title: "Connection Failed", description: data.error || "Failed to connect steps", variant: "destructive" });
       }
     } catch (error) {
       console.error("Error creating edge:", error);
+      toast({ title: "Connection Failed", description: "Network error", variant: "destructive" });
     }
-  };
+  }, [toast]);
 
-  // Handle deleting an edge
-  const handleDeleteEdge = async (edgeId: string) => {
+  // Handle deleting an edge (memoized)
+  const handleDeleteEdge = useCallback(async (edgeId: string) => {
     try {
       const response = await fetch("/api/future-state/edges", {
         method: "DELETE",
@@ -576,69 +589,90 @@ export function FutureStateDesigner({
         body: JSON.stringify({ edgeId }),
       });
 
+      const data = await response.json();
       if (response.ok) {
-        if (selectedFutureState) {
-          await fetchFutureStateGraph(selectedFutureState.id);
+        const futureState = selectedFutureStateRef.current;
+        if (futureState) {
+          await fetchFutureStateGraph(futureState.id);
         }
         toast({
           title: "Connection Removed",
           description: "Connection deleted.",
         });
+      } else {
+        console.error("Error deleting edge:", data);
+        toast({ title: "Delete Failed", description: data.error || "Failed to delete connection", variant: "destructive" });
       }
     } catch (error) {
       console.error("Error deleting edge:", error);
+      toast({ title: "Delete Failed", description: "Network error", variant: "destructive" });
     }
-  };
+  }, [toast]);
 
-  // Handle updating a node (name, action, etc.)
-  const handleUpdateNode = async (nodeId: string, updates: { name?: string; action?: NodeAction }) => {
+  // Handle updating a node (name, action, etc.) - memoized
+  const handleUpdateNode = useCallback(async (nodeId: string, updates: { name?: string; action?: NodeAction }) => {
     try {
       const response = await fetch("/api/future-state/nodes", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ nodeId, updates }),
       });
+      const data = await response.json();
       if (response.ok) {
-        if (selectedFutureState) {
-          await fetchFutureStateGraph(selectedFutureState.id);
+        const futureState = selectedFutureStateRef.current;
+        if (futureState) {
+          await fetchFutureStateGraph(futureState.id);
         }
         toast({ title: "Step Updated", description: "Step updated successfully." });
+      } else {
+        console.error("Error updating node:", data);
+        toast({ title: "Update Failed", description: data.error || "Failed to update step", variant: "destructive" });
       }
     } catch (error) {
       console.error("Error updating node:", error);
+      toast({ title: "Update Failed", description: "Network error", variant: "destructive" });
     }
-  };
+  }, [toast]);
 
-  // Handle deleting a node
-  const handleDeleteNode = async (nodeId: string) => {
+  // Handle deleting a node (memoized)
+  const handleDeleteNode = useCallback(async (nodeId: string) => {
     try {
       const response = await fetch("/api/future-state/nodes", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ nodeId, cascade: true }),
       });
+      const data = await response.json();
       if (response.ok) {
-        if (selectedFutureState) {
-          await fetchFutureStateGraph(selectedFutureState.id);
+        const futureState = selectedFutureStateRef.current;
+        if (futureState) {
+          await fetchFutureStateGraph(futureState.id);
         }
         toast({ title: "Step Deleted", description: "Step removed from the design." });
+      } else {
+        console.error("Error deleting node:", data);
+        toast({ title: "Delete Failed", description: data.error || "Failed to delete step", variant: "destructive" });
       }
     } catch (error) {
       console.error("Error deleting node:", error);
+      toast({ title: "Delete Failed", description: "Network error", variant: "destructive" });
     }
-  };
+  }, [toast]);
 
-  // Handle duplicating a node
-  const handleDuplicateNode = async (nodeId: string) => {
-    const node = selectedFutureState?.nodes.find(n => n.id === nodeId);
-    if (!node || !selectedFutureState) return;
+  // Handle duplicating a node (memoized)
+  const handleDuplicateNode = useCallback(async (nodeId: string) => {
+    const futureState = selectedFutureStateRef.current;
+    if (!futureState) return;
+
+    const node = futureState.nodes.find(n => n.id === nodeId);
+    if (!node) return;
 
     try {
       const response = await fetch("/api/future-state/nodes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          futureStateId: selectedFutureState.id,
+          futureStateId: futureState.id,
           name: `${node.name} (copy)`,
           lane: node.lane,
           stepType: node.step_type,
@@ -648,13 +682,13 @@ export function FutureStateDesigner({
         }),
       });
       if (response.ok) {
-        await fetchFutureStateGraph(selectedFutureState.id);
+        await fetchFutureStateGraph(futureState.id);
         toast({ title: "Step Duplicated", description: "A copy of the step has been created." });
       }
     } catch (error) {
       console.error("Error duplicating node:", error);
     }
-  };
+  }, [toast]);
 
   // Handle saving as a new version
   const handleSaveAsNewVersion = async (name: string, description?: string): Promise<string | null> => {
@@ -903,10 +937,9 @@ export function FutureStateDesigner({
                     currentSteps={currentSteps}
                     stepConnections={connections}
                     observations={observations}
-                    onNodeClick={(nodeId) => handleOpenStepDesign(nodeId)}
-                    highlightedNodeId={highlightedStepId}
                     getLinkedSolution={getLinkedSolution}
-                    // Edit mode props
+                    onNodeClick={handleOpenStepDesign}
+                    highlightedNodeId={highlightedStepId}
                     isEditMode={isEditMode}
                     onCreateNode={handleCreateNode}
                     onUpdateNode={handleUpdateNode}

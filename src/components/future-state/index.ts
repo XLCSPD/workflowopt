@@ -10,7 +10,8 @@ export { WorkflowContextPanel } from "./WorkflowContextPanel";
 export { MiniProcessMap } from "./MiniProcessMap";
 export { StepImpactSummary } from "./StepImpactSummary";
 export { SessionContextHeader } from "./SessionContextHeader";
-export { HorizontalFlowView } from "./HorizontalFlowView";
+// HorizontalFlowView disabled for debugging
+// export { HorizontalFlowView } from "./HorizontalFlowView";
 export {
   ConflictDialog,
   LockExpiredDialog,
