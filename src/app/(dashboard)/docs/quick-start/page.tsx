@@ -334,7 +334,7 @@ export default function QuickStartPage() {
   const progress = ((currentStep + 1) / quickStartSteps.length) * 100;
 
   const handleNext = () => {
-    setCompletedSteps((prev) => new Set([...prev, currentStep]));
+    setCompletedSteps((prev) => new Set([...Array.from(prev), currentStep]));
     if (currentStep < quickStartSteps.length - 1) {
       setCurrentStep(currentStep + 1);
     }
