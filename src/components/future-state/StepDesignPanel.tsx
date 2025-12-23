@@ -522,7 +522,7 @@ export function StepDesignPanel({
   );
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full min-h-0">
       {/* Header - No close button here, Sheet provides one */}
       <div className="shrink-0 p-4 pb-3 border-b bg-white">
         <div className="pr-8"> {/* Leave space for Sheet's close button */}

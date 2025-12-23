@@ -912,7 +912,7 @@ export function FutureStateDesigner({
 
       {/* Step Design Panel Sheet */}
       <Sheet open={stepDesignPanelOpen} onOpenChange={setStepDesignPanelOpen}>
-        <SheetContent side="right" className="w-full sm:w-[480px] max-w-[100vw] p-0 flex flex-col h-full overflow-y-auto">
+        <SheetContent side="right" className="w-full sm:w-[480px] max-w-[100vw] p-0 flex flex-col h-[100dvh] overflow-hidden">
           {selectedNodeId && selectedFutureState ? (
             <StepDesignPanel
               sessionId={sessionId}
