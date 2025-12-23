@@ -39,6 +39,10 @@ import {
   ZoomOut,
   Maximize2,
   Lightbulb,
+  Pencil,
+  Trash2,
+  Copy,
+  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type {
@@ -351,11 +355,8 @@ function HorizontalFlowViewInner({
   onNodeSelect,
   onNodePositionChange,
   onCreateNode,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   onUpdateNode,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   onDeleteNode,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   onDuplicateNode,
   onCreateEdge,
   onDeleteEdge,
@@ -363,6 +364,18 @@ function HorizontalFlowViewInner({
   const [viewState, setViewState] = useState<"current" | "future">("future");
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+
+  // Context menu state for node operations
+  const [contextMenu, setContextMenu] = useState<{
+    nodeId: string;
+    nodeName: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  
+  // Editing state for inline rename
+  const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState("");
 
   // Calculate lanes from source data (memoized to avoid state update loops)
   const laneList = useMemo(() => {
@@ -611,6 +624,118 @@ function HorizontalFlowViewInner({
     setEdges,
     fitView,
   ]);
+
+  // Handle node context menu (right-click)
+  const handleNodeContextMenu = useCallback(
+    (event: React.MouseEvent, node: Node) => {
+      if (!isEditMode) return;
+      event.preventDefault();
+      const data = node.data as FlowStepData;
+      setContextMenu({
+        nodeId: node.id,
+        nodeName: data.label,
+        x: event.clientX,
+        y: event.clientY,
+      });
+    },
+    [isEditMode]
+  );
+
+  // Close context menu
+  const closeContextMenu = useCallback(() => {
+    setContextMenu(null);
+  }, []);
+
+  // Handle rename from context menu
+  const handleStartRename = useCallback(() => {
+    if (contextMenu) {
+      setEditingNodeId(contextMenu.nodeId);
+      setEditingName(contextMenu.nodeName);
+      closeContextMenu();
+    }
+  }, [contextMenu, closeContextMenu]);
+
+  // Handle save rename
+  const handleSaveRename = useCallback(() => {
+    if (editingNodeId && editingName.trim() && onUpdateNode) {
+      onUpdateNode(editingNodeId, { name: editingName.trim() });
+    }
+    setEditingNodeId(null);
+    setEditingName("");
+  }, [editingNodeId, editingName, onUpdateNode]);
+
+  // Handle cancel rename
+  const handleCancelRename = useCallback(() => {
+    setEditingNodeId(null);
+    setEditingName("");
+  }, []);
+
+  // Handle delete from context menu
+  const handleContextDelete = useCallback(() => {
+    if (contextMenu && onDeleteNode) {
+      if (window.confirm(`Delete step "${contextMenu.nodeName}"?`)) {
+        onDeleteNode(contextMenu.nodeId);
+      }
+    }
+    closeContextMenu();
+  }, [contextMenu, onDeleteNode, closeContextMenu]);
+
+  // Handle duplicate from context menu
+  const handleContextDuplicate = useCallback(() => {
+    if (contextMenu && onDuplicateNode) {
+      onDuplicateNode(contextMenu.nodeId);
+    }
+    closeContextMenu();
+  }, [contextMenu, onDuplicateNode, closeContextMenu]);
+
+  // Keyboard event handler for Delete key
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (!isEditMode) return;
+      
+      // Don't handle if user is typing in an input
+      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+      
+      if (event.key === "Delete" || event.key === "Backspace") {
+        // Get selected nodes from React Flow state
+        const selectedNodes = nodes.filter(n => n.selected);
+        if (selectedNodes.length > 0 && onDeleteNode) {
+          event.preventDefault();
+          const nodeNames = selectedNodes.map(n => (n.data as FlowStepData).label).join(", ");
+          if (window.confirm(`Delete ${selectedNodes.length} step(s): ${nodeNames}?`)) {
+            selectedNodes.forEach(n => onDeleteNode(n.id));
+          }
+        }
+      }
+      
+      if (event.key === "Escape") {
+        closeContextMenu();
+        handleCancelRename();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isEditMode, nodes, onDeleteNode, closeContextMenu, handleCancelRename]);
+
+  // Close context menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = () => {
+      if (contextMenu) {
+        closeContextMenu();
+      }
+    };
+    
+    if (contextMenu) {
+      // Use setTimeout to avoid closing immediately on the same click
+      setTimeout(() => {
+        window.addEventListener("click", handleClickOutside);
+      }, 0);
+      return () => window.removeEventListener("click", handleClickOutside);
+    }
+  }, [contextMenu, closeContextMenu]);
 
   // Auto-layout handler for manual triggering
   const handleAutoLayout = useCallback(() => {
@@ -910,6 +1035,7 @@ function HorizontalFlowViewInner({
               }
             }
           }}
+          onNodeContextMenu={handleNodeContextMenu}
           onPaneClick={(event) => {
             // Double-click to create node in edit mode
             if (isEditMode && onCreateNode && event.detail === 2) {
@@ -958,6 +1084,93 @@ function HorizontalFlowViewInner({
           />
         </ReactFlow>
       </div>
+
+      {/* Context Menu for Nodes */}
+      <AnimatePresence>
+        {contextMenu && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            transition={{ duration: 0.1 }}
+            className="fixed z-50 bg-white rounded-lg shadow-lg border border-slate-200 py-1 min-w-[160px]"
+            style={{ left: contextMenu.x, top: contextMenu.y }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              className="w-full px-3 py-2 text-left text-sm hover:bg-slate-100 flex items-center gap-2"
+              onClick={handleStartRename}
+            >
+              <Pencil className="w-4 h-4 text-slate-500" />
+              Rename
+            </button>
+            {onDuplicateNode && (
+              <button
+                className="w-full px-3 py-2 text-left text-sm hover:bg-slate-100 flex items-center gap-2"
+                onClick={handleContextDuplicate}
+              >
+                <Copy className="w-4 h-4 text-slate-500" />
+                Duplicate
+              </button>
+            )}
+            <div className="border-t border-slate-200 my-1" />
+            <button
+              className="w-full px-3 py-2 text-left text-sm hover:bg-red-50 text-red-600 flex items-center gap-2"
+              onClick={handleContextDelete}
+            >
+              <Trash2 className="w-4 h-4" />
+              Delete
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Inline Rename Dialog */}
+      <AnimatePresence>
+        {editingNodeId && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/20"
+            onClick={handleCancelRename}
+          >
+            <motion.div
+              initial={{ scale: 0.95 }}
+              animate={{ scale: 1 }}
+              exit={{ scale: 0.95 }}
+              className="bg-white rounded-lg shadow-xl p-4 min-w-[300px]"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex justify-between items-center mb-3">
+                <h3 className="font-semibold text-slate-900">Rename Step</h3>
+                <button onClick={handleCancelRename} className="text-slate-400 hover:text-slate-600">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <input
+                type="text"
+                value={editingName}
+                onChange={(e) => setEditingName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleSaveRename();
+                  if (e.key === "Escape") handleCancelRename();
+                }}
+                className="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:border-transparent"
+                autoFocus
+              />
+              <div className="flex justify-end gap-2 mt-4">
+                <Button variant="outline" size="sm" onClick={handleCancelRename}>
+                  Cancel
+                </Button>
+                <Button size="sm" onClick={handleSaveRename}>
+                  Save
+                </Button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
