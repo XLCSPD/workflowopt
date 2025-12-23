@@ -18,3 +18,11 @@ export {
   type ConflictInfo,
 } from "./ConflictDialog";
 
+// Design Studio components
+export { DesignStudioProvider, useDesignStudio } from "./DesignStudioContext";
+export { FutureStateToolbox } from "./FutureStateToolbox";
+export { VersionPanel } from "./VersionPanel";
+export { NodeContextMenu } from "./NodeContextMenu";
+export { CanvasContextMenu } from "./CanvasContextMenu";
+export { AnnotationNode, AnnotationBadge, AnnotationList } from "./AnnotationNode";
+

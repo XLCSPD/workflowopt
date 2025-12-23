@@ -65,6 +65,15 @@ interface HorizontalFlowViewProps {
   onNodeClick: (nodeId: string) => void;
   highlightedNodeId?: string | null;
   getLinkedSolution?: (solutionId: string | null | undefined) => SolutionCard | null | undefined;
+  // Edit mode props
+  isEditMode?: boolean;
+  selectedNodeIds?: string[];
+  onNodeSelect?: (nodeId: string, addToSelection?: boolean) => void;
+  onNodePositionChange?: (nodeId: string, position: { x: number; y: number }) => void;
+  onCreateNode?: (lane: string, position: { x: number; y: number }, stepType?: string) => void;
+  onDeleteNode?: (nodeId: string) => void; // Will be used with context menu
+  onCreateEdge?: (sourceId: string, targetId: string) => void;
+  onDeleteEdge?: (edgeId: string) => void;
 }
 
 interface FlowStepData {
@@ -332,6 +341,16 @@ function HorizontalFlowViewInner({
   onNodeClick,
   highlightedNodeId,
   getLinkedSolution,
+  // Edit mode props
+  isEditMode = false,
+  selectedNodeIds = [],
+  onNodeSelect,
+  onNodePositionChange,
+  onCreateNode,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  onDeleteNode,
+  onCreateEdge,
+  onDeleteEdge,
 }: HorizontalFlowViewProps) {
   const [viewState, setViewState] = useState<"current" | "future">("future");
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
@@ -443,7 +462,7 @@ function HorizontalFlowViewInner({
             cycleTime: node.cycle_time_minutes,
             linkedSolutionName,
           },
-          selected: node.id === highlightedNodeId,
+          selected: node.id === highlightedNodeId || selectedNodeIds.includes(node.id),
         });
       });
 
@@ -805,11 +824,58 @@ function HorizontalFlowViewInner({
         <ReactFlow
           nodes={nodes}
           edges={edges}
-          onNodesChange={onNodesChange}
+          onNodesChange={(changes) => {
+            onNodesChange(changes);
+            // Track position changes for edit mode
+            if (isEditMode && onNodePositionChange) {
+              changes.forEach((change) => {
+                if (change.type === "position" && change.position && change.dragging === false) {
+                  onNodePositionChange(change.id, change.position);
+                }
+              });
+            }
+          }}
           onEdgesChange={onEdgesChange}
-          onNodeClick={handleNodeClick}
+          onNodeClick={(event, node) => {
+            if (isEditMode && onNodeSelect) {
+              onNodeSelect(node.id, event.shiftKey || event.metaKey || event.ctrlKey);
+            } else {
+              handleNodeClick(event, node);
+            }
+          }}
+          onConnect={(params) => {
+            if (isEditMode && onCreateEdge && params.source && params.target) {
+              onCreateEdge(params.source, params.target);
+            }
+          }}
+          onEdgeClick={(event, edge) => {
+            if (isEditMode && onDeleteEdge) {
+              event.stopPropagation();
+              // Could show confirmation or directly delete
+              if (window.confirm("Delete this connection?")) {
+                onDeleteEdge(edge.id);
+              }
+            }
+          }}
+          onPaneClick={(event) => {
+            // Double-click to create node in edit mode
+            if (isEditMode && onCreateNode && event.detail === 2) {
+              const reactFlowBounds = containerRef.current?.getBoundingClientRect();
+              if (reactFlowBounds) {
+                const position = {
+                  x: event.clientX - reactFlowBounds.left - 112, // Offset for swimlane labels
+                  y: event.clientY - reactFlowBounds.top,
+                };
+                // Determine which lane based on Y position
+                const laneIndex = Math.floor(position.y / (LANE_HEIGHT + LANE_GAP));
+                const lane = laneList[laneIndex] || laneList[0] || "Default";
+                onCreateNode(lane, position, "action");
+              }
+            }
+          }}
           nodeTypes={nodeTypes}
           connectionLineType={ConnectionLineType.SmoothStep}
+          connectionLineStyle={isEditMode ? { stroke: "#f59e0b", strokeWidth: 2 } : undefined}
           fitView
           fitViewOptions={{ padding: 0.15, minZoom: 0.5, maxZoom: 1.2 }}
           minZoom={0.3}
@@ -817,6 +883,10 @@ function HorizontalFlowViewInner({
           defaultViewport={{ x: 0, y: 0, zoom: 0.8 }}
           proOptions={{ hideAttribution: true }}
           className="bg-transparent"
+          nodesDraggable={isEditMode}
+          nodesConnectable={isEditMode}
+          elementsSelectable={isEditMode}
+          selectNodesOnDrag={false}
         >
           <Background color="#e2e8f0" gap={20} size={1} />
           <MiniMap

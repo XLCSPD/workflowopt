@@ -9,18 +9,16 @@ import { WorkflowContextPanel } from "./WorkflowContextPanel";
 import { StepImpactSummary } from "./StepImpactSummary";
 import { SessionContextHeader } from "./SessionContextHeader";
 import { HorizontalFlowView } from "./HorizontalFlowView";
+// Note: DesignStudioProvider and useDesignStudio will be used in future phases
+// import { DesignStudioProvider, useDesignStudio } from "./DesignStudioContext";
+import { FutureStateToolbox } from "./FutureStateToolbox";
+import { VersionPanel } from "./VersionPanel";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+// Select components removed - using VersionPanel for version selection now
 import {
   Sheet,
   SheetContent,
@@ -54,6 +52,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
+import type { FutureStateLane, LaneColor, FutureStateAnnotation } from "@/types/design-studio";
 import type {
   FutureState,
   FutureStateNode,
@@ -112,6 +111,14 @@ export function FutureStateDesigner({
   const [contextPanelOpen, setContextPanelOpen] = useState(true);
   const [highlightedStepId, setHighlightedStepId] = useState<string | null>(null);
   const [isMobile, setIsMobile] = useState(false);
+
+  // Edit mode and toolbox state
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [toolboxCollapsed, setToolboxCollapsed] = useState(false);
+  const [lanes, setLanes] = useState<FutureStateLane[]>([]);
+  // Annotations state - will be used for displaying annotations in future phases
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [annotations, setAnnotations] = useState<FutureStateAnnotation[]>([]);
 
   // Detect mobile viewport
   useEffect(() => {
@@ -266,6 +273,43 @@ export function FutureStateDesigner({
     fetchData();
   }, [fetchData]);
 
+  // Fetch lanes and annotations when future state changes
+  useEffect(() => {
+    async function fetchLanesAndAnnotations() {
+      if (!selectedFutureState?.id) {
+        setLanes([]);
+        setAnnotations([]);
+        return;
+      }
+
+      try {
+        const [lanesRes, annotationsRes] = await Promise.all([
+          supabase
+            .from("future_state_lanes")
+            .select("*")
+            .eq("future_state_id", selectedFutureState.id)
+            .order("order_index", { ascending: true }),
+          supabase
+            .from("future_state_annotations")
+            .select("*")
+            .eq("future_state_id", selectedFutureState.id)
+            .order("created_at", { ascending: true }),
+        ]);
+
+        if (!lanesRes.error && lanesRes.data) {
+          setLanes(lanesRes.data as FutureStateLane[]);
+        }
+        if (!annotationsRes.error && annotationsRes.data) {
+          setAnnotations(annotationsRes.data as FutureStateAnnotation[]);
+        }
+      } catch (error) {
+        console.error("Error fetching lanes/annotations:", error);
+      }
+    }
+
+    fetchLanesAndAnnotations();
+  }, [selectedFutureState?.id, supabase]);
+
   // Auto-collapse context panel in flowchart mode (flowchart has its own context)
   useEffect(() => {
     if (viewMode === "flowchart") {
@@ -417,6 +461,171 @@ export function FutureStateDesigner({
     return node.action === "modify" || node.action === "new";
   };
 
+  // Handle adding a lane from the toolbox
+  const handleAddLane = async (name: string, color: LaneColor) => {
+    if (!selectedFutureState) return;
+
+    try {
+      const response = await fetch("/api/future-state/lanes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          futureStateId: selectedFutureState.id,
+          name,
+          color,
+        }),
+      });
+
+      if (response.ok) {
+        const { lane } = await response.json();
+        setLanes((prev) => [...prev, lane]);
+        toast({
+          title: "Lane Added",
+          description: `Added lane "${name}"`,
+        });
+      }
+    } catch (error) {
+      console.error("Error adding lane:", error);
+    }
+  };
+
+  // Handle creating a node from the toolbox
+  const handleCreateNode = async (lane: string, position: { x: number; y: number }, stepType = "action") => {
+    if (!selectedFutureState) return;
+
+    try {
+      const response = await fetch("/api/future-state/nodes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          futureStateId: selectedFutureState.id,
+          name: "New Step",
+          lane,
+          stepType,
+          positionX: position.x,
+          positionY: position.y,
+          action: "new",
+        }),
+      });
+
+      if (response.ok) {
+        await fetchFutureStateGraph(selectedFutureState.id);
+        toast({
+          title: "Step Added",
+          description: "New step created. Click to edit.",
+        });
+      }
+    } catch (error) {
+      console.error("Error creating node:", error);
+    }
+  };
+
+  // Handle updating node position
+  const handleNodePositionChange = async (nodeId: string, position: { x: number; y: number }) => {
+    try {
+      await fetch("/api/future-state/nodes", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          nodeId,
+          updates: { positionX: position.x, positionY: position.y },
+        }),
+      });
+    } catch (error) {
+      console.error("Error updating node position:", error);
+    }
+  };
+
+  // Handle creating an edge
+  const handleCreateEdge = async (sourceId: string, targetId: string) => {
+    if (!selectedFutureState) return;
+
+    try {
+      const response = await fetch("/api/future-state/edges", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          futureStateId: selectedFutureState.id,
+          sourceNodeId: sourceId,
+          targetNodeId: targetId,
+        }),
+      });
+
+      if (response.ok) {
+        await fetchFutureStateGraph(selectedFutureState.id);
+        toast({
+          title: "Connection Added",
+          description: "Steps connected.",
+        });
+      }
+    } catch (error) {
+      console.error("Error creating edge:", error);
+    }
+  };
+
+  // Handle deleting an edge
+  const handleDeleteEdge = async (edgeId: string) => {
+    try {
+      const response = await fetch("/api/future-state/edges", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ edgeId }),
+      });
+
+      if (response.ok) {
+        if (selectedFutureState) {
+          await fetchFutureStateGraph(selectedFutureState.id);
+        }
+        toast({
+          title: "Connection Removed",
+          description: "Connection deleted.",
+        });
+      }
+    } catch (error) {
+      console.error("Error deleting edge:", error);
+    }
+  };
+
+  // Handle saving as a new version
+  const handleSaveAsNewVersion = async (name: string, description?: string): Promise<string | null> => {
+    if (!selectedFutureState) return null;
+
+    try {
+      const response = await fetch("/api/future-state/versions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId,
+          sourceVersionId: selectedFutureState.id,
+          name,
+          description,
+        }),
+      });
+
+      if (response.ok) {
+        const { versionId } = await response.json();
+        toast({
+          title: "Version Created",
+          description: `Created new version "${name}"`,
+        });
+        await fetchData();
+        await fetchFutureStateGraph(versionId);
+        return versionId;
+      }
+    } catch (error) {
+      console.error("Error creating version:", error);
+    }
+    return null;
+  };
+
+  // Handle save
+  const handleSave = async () => {
+    toast({
+      title: "Saved",
+      description: "Changes saved successfully.",
+    });
+  };
+
   if (loading) {
     return (
       <div className="p-6 space-y-6">
@@ -443,24 +652,44 @@ export function FutureStateDesigner({
         { label: "New Steps", value: newCount },
       ]}
       actions={
-        <div className="flex items-center gap-2">
-          {futureStates.length > 0 && (
-            <Select
-              value={selectedFutureState?.id || ""}
-              onValueChange={(id) => fetchFutureStateGraph(id)}
+        <div className="flex items-center gap-3">
+          {/* Edit Mode Toggle */}
+          <div className="flex items-center gap-1 bg-muted rounded-lg p-1">
+            <Button
+              variant={!isEditMode ? "secondary" : "ghost"}
+              size="sm"
+              onClick={() => setIsEditMode(false)}
+              className="gap-1.5"
             >
-              <SelectTrigger className="w-48">
-                <SelectValue placeholder="Select version" />
-              </SelectTrigger>
-              <SelectContent>
-                {futureStates.map((fs) => (
-                  <SelectItem key={fs.id} value={fs.id}>
-                    {fs.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              <Eye className="h-4 w-4" />
+              View
+            </Button>
+            <Button
+              variant={isEditMode ? "secondary" : "ghost"}
+              size="sm"
+              onClick={() => setIsEditMode(true)}
+              className="gap-1.5"
+              disabled={!selectedFutureState}
+            >
+              <Pencil className="h-4 w-4" />
+              Edit
+            </Button>
+          </div>
+
+          {/* Version Panel */}
+          {selectedFutureState && (
+            <VersionPanel
+              sessionId={sessionId}
+              currentVersionId={selectedFutureState.id}
+              onVersionSelect={(id) => fetchFutureStateGraph(id)}
+              onSaveAsNewVersion={handleSaveAsNewVersion}
+              isDirty={false}
+              isSaving={false}
+              onSave={handleSave}
+            />
           )}
+
+          {/* Generate Button */}
           <Button
             onClick={handleRunDesign}
             disabled={isRunning || acceptedSolutions.length === 0}
@@ -474,7 +703,7 @@ export function FutureStateDesigner({
             ) : (
               <>
                 <Sparkles className="h-4 w-4" />
-                {futureStates.length === 0 ? "Generate Design" : "New Version"}
+                {futureStates.length === 0 ? "Generate Design" : "Regenerate"}
               </>
             )}
           </Button>
@@ -584,16 +813,38 @@ export function FutureStateDesigner({
 
             {/* Horizontal Flowchart View */}
             {viewMode === "flowchart" && (
-              <HorizontalFlowView
-                futureStateNodes={selectedFutureState.nodes}
-                futureStateEdges={selectedFutureState.edges}
-                currentSteps={currentSteps}
-                stepConnections={connections}
-                observations={observations}
-                onNodeClick={(nodeId) => handleOpenStepDesign(nodeId)}
-                highlightedNodeId={highlightedStepId}
-                getLinkedSolution={getLinkedSolution}
-              />
+              <div className="flex h-full">
+                {/* Toolbox (visible in edit mode) */}
+                {isEditMode && (
+                  <FutureStateToolbox
+                    isCollapsed={toolboxCollapsed}
+                    onToggleCollapse={() => setToolboxCollapsed(!toolboxCollapsed)}
+                    lanes={lanes}
+                    onAddLane={handleAddLane}
+                    className="flex-shrink-0"
+                  />
+                )}
+                
+                {/* Canvas */}
+                <div className="flex-1 min-w-0">
+                  <HorizontalFlowView
+                    futureStateNodes={selectedFutureState.nodes}
+                    futureStateEdges={selectedFutureState.edges}
+                    currentSteps={currentSteps}
+                    stepConnections={connections}
+                    observations={observations}
+                    onNodeClick={(nodeId) => handleOpenStepDesign(nodeId)}
+                    highlightedNodeId={highlightedStepId}
+                    getLinkedSolution={getLinkedSolution}
+                    // Edit mode props
+                    isEditMode={isEditMode}
+                    onCreateNode={handleCreateNode}
+                    onNodePositionChange={handleNodePositionChange}
+                    onCreateEdge={handleCreateEdge}
+                    onDeleteEdge={handleDeleteEdge}
+                  />
+                </div>
+              </div>
             )}
 
             {/* Process Maps (Vertical View) */}
