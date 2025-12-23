@@ -51,6 +51,7 @@ import type {
   SolutionCard,
 } from "@/types";
 import "reactflow/dist/style.css";
+import { STEP_TOOLBOX_MIME, ANNOTATION_TOOLBOX_MIME } from "./FutureStateToolbox";
 
 // ============================================
 // TYPES
@@ -386,9 +387,49 @@ function HorizontalFlowViewInner({
     return stepObs.reduce((sum, obs) => sum + (obs.priority_score || 0), 0);
   }, [observationsByStep]);
 
-  const { fitView, zoomIn, zoomOut } = useReactFlow();
+  const { fitView, zoomIn, zoomOut, screenToFlowPosition } = useReactFlow();
   const viewport = useViewport();
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Handle drag over for toolbox drops
+  const handleDragOver = useCallback((event: React.DragEvent) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  }, []);
+
+  // Handle drop from toolbox
+  const handleDrop = useCallback((event: React.DragEvent) => {
+    event.preventDefault();
+    
+    if (!isEditMode || !onCreateNode) return;
+    
+    // Check if it's a step type drop
+    const stepType = event.dataTransfer.getData(STEP_TOOLBOX_MIME);
+    if (stepType) {
+      // Get the position where the element was dropped
+      const position = screenToFlowPosition({
+        x: event.clientX,
+        y: event.clientY,
+      });
+      
+      // Determine which lane based on Y position
+      const laneIndex = Math.floor(position.y / (LANE_HEIGHT + LANE_GAP));
+      const lane = laneList[laneIndex] || laneList[0] || "Default";
+      
+      onCreateNode(lane, position, stepType);
+      return;
+    }
+    
+    // Check if it's an annotation type drop
+    const annotationType = event.dataTransfer.getData(ANNOTATION_TOOLBOX_MIME);
+    if (annotationType) {
+      // TODO: Handle annotation drops when annotation creation is implemented
+      console.log("Annotation drop:", annotationType, screenToFlowPosition({
+        x: event.clientX,
+        y: event.clientY,
+      }));
+    }
+  }, [isEditMode, onCreateNode, screenToFlowPosition, laneList]);
 
   // Calculate scaled lane height based on viewport zoom
   const scaledLaneHeight = LANE_HEIGHT * viewport.zoom;
@@ -820,7 +861,11 @@ function HorizontalFlowViewInner({
       </div>
 
       {/* React Flow Canvas - offset to make room for fixed labels */}
-      <div className="absolute left-28 right-0 top-0 bottom-0">
+      <div 
+        className="absolute left-28 right-0 top-0 bottom-0"
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
+      >
         <ReactFlow
           nodes={nodes}
           edges={edges}

@@ -37,25 +37,28 @@ export async function POST(request: NextRequest) {
     }
 
     // Verify the future state exists and user has access
+    // Note: is_locked column may not exist until migration is applied
     const { data: futureState, error: fsError } = await supabase
       .from("future_states")
-      .select("id, is_locked, session_id")
+      .select("id, session_id")
       .eq("id", futureStateId)
       .single();
 
     if (fsError || !futureState) {
+      console.error("Future state lookup error:", fsError);
       return NextResponse.json(
         { error: "Future state not found" },
         { status: 404 }
       );
     }
 
-    if (futureState.is_locked) {
-      return NextResponse.json(
-        { error: "Future state is locked and cannot be modified" },
-        { status: 403 }
-      );
-    }
+    // Note: is_locked check will be enabled after migration is applied
+    // if (futureState.is_locked) {
+    //   return NextResponse.json(
+    //     { error: "Future state is locked and cannot be modified" },
+    //     { status: 403 }
+    //   );
+    // }
 
     // Create the node
     const { data: node, error: insertError } = await supabase

@@ -381,7 +381,7 @@ export async function GET(request: NextRequest) {
           *,
           nodes:future_state_nodes(*),
           edges:future_state_edges(*),
-          creator:users!future_states_created_by_fkey(id, full_name)
+          creator:users!future_states_created_by_fkey(id, email)
         `)
         .eq("id", versionId)
         .single();
@@ -408,7 +408,7 @@ export async function GET(request: NextRequest) {
           created_by,
           created_at,
           updated_at,
-          creator:users!future_states_created_by_fkey(id, full_name)
+          creator:users!future_states_created_by_fkey(id, email)
         `)
         .eq("session_id", sessionId)
         .order("version", { ascending: false });
