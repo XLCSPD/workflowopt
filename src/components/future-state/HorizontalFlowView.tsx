@@ -381,10 +381,10 @@ function HorizontalFlowViewInner({
   
   // Store callback refs to avoid triggering useEffect when callbacks change
   const callbacksRef = useRef({
-    getStepWasteTypes: (stepId: string): WasteType[] => [],
-    getStepPriorityScore: (stepId: string): number => 0,
-    getLinkedSolution: (solutionId: string | null | undefined) => null as SolutionCard | null | undefined,
-    fitView: (options?: { padding?: number; duration?: number }) => {},
+    getStepWasteTypes: (_stepId: string): WasteType[] => [],
+    getStepPriorityScore: (_stepId: string): number => 0,
+    getLinkedSolution: (_solutionId: string | null | undefined) => null as SolutionCard | null | undefined,
+    fitView: (_options?: { padding?: number; duration?: number }) => {},
   });
 
   // Calculate lanes from source data (memoized to avoid state update loops)
