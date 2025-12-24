@@ -759,27 +759,69 @@ export function FutureStateDesigner({
       ]}
       actions={
         <div className="flex items-center gap-3">
-          {/* Edit Mode Toggle */}
-          <div className="flex items-center gap-1 bg-muted rounded-lg p-1">
-            <Button
-              variant={!isEditMode ? "secondary" : "ghost"}
-              size="sm"
-              onClick={() => setIsEditMode(false)}
-              className="gap-1.5"
-            >
-              <Eye className="h-4 w-4" />
-              View
-            </Button>
-            <Button
-              variant={isEditMode ? "secondary" : "ghost"}
-              size="sm"
-              onClick={() => setIsEditMode(true)}
-              className="gap-1.5"
-              disabled={!selectedFutureState}
-            >
-              <Pencil className="h-4 w-4" />
-              Edit
-            </Button>
+          {/* Edit Mode Toggle - Enhanced with animations */}
+          <div className="relative flex items-center">
+            {/* Container with sliding background */}
+            <div className={cn(
+              "relative flex items-center gap-0.5 rounded-full p-1 transition-all duration-300",
+              isEditMode 
+                ? "bg-amber-100 ring-2 ring-amber-400/50 shadow-[0_0_15px_rgba(251,191,36,0.3)]" 
+                : "bg-muted"
+            )}>
+              {/* Sliding indicator */}
+              <div 
+                className={cn(
+                  "absolute h-[calc(100%-8px)] rounded-full transition-all duration-300 ease-out",
+                  isEditMode 
+                    ? "left-[calc(50%+2px)] w-[calc(50%-6px)] bg-amber-500 shadow-md" 
+                    : "left-1 w-[calc(50%-6px)] bg-white shadow-sm"
+                )} 
+              />
+              
+              {/* View button */}
+              <button
+                onClick={() => setIsEditMode(false)}
+                className={cn(
+                  "relative z-10 flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-full transition-all duration-200",
+                  !isEditMode 
+                    ? "text-slate-900" 
+                    : "text-slate-500 hover:text-slate-700"
+                )}
+              >
+                <Eye className={cn(
+                  "h-4 w-4 transition-transform duration-200",
+                  !isEditMode && "scale-110"
+                )} />
+                View
+              </button>
+              
+              {/* Edit button */}
+              <button
+                onClick={() => setIsEditMode(true)}
+                disabled={!selectedFutureState}
+                className={cn(
+                  "relative z-10 flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-full transition-all duration-200",
+                  isEditMode 
+                    ? "text-white" 
+                    : "text-slate-500 hover:text-slate-700",
+                  !selectedFutureState && "opacity-50 cursor-not-allowed"
+                )}
+              >
+                <Pencil className={cn(
+                  "h-4 w-4 transition-all duration-200",
+                  isEditMode && "scale-110"
+                )} />
+                Edit
+              </button>
+            </div>
+            
+            {/* Edit mode indicator dot */}
+            {isEditMode && (
+              <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-500" />
+              </span>
+            )}
           </div>
 
           {/* Version Panel */}
