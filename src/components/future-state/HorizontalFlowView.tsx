@@ -530,12 +530,15 @@ function HorizontalFlowViewInner({
         const linkedSolution = callbacksRef.current.getLinkedSolution(node.linked_solution_id);
         const linkedSolutionName = linkedSolution?.title;
 
+        // Use stored position if available and valid, otherwise calculate default
+        const hasStoredPosition = node.position_x != null && node.position_x !== 0;
+        const defaultX = 20 + indexInLane * (NODE_WIDTH + NODE_GAP_X);
+        
         flowNodes.push({
           id: node.id,
           type: "flowStep",
           position: { 
-            // Use stored position if available, otherwise calculate default
-            x: node.position_x > 0 ? node.position_x : 20 + indexInLane * (NODE_WIDTH + NODE_GAP_X),
+            x: hasStoredPosition ? node.position_x : defaultX,
             y: laneY, // Y is always lane-based for swimlane alignment
           },
           data: {
@@ -627,20 +630,10 @@ function HorizontalFlowViewInner({
       }));
     }
 
-    // Apply auto-layout using Dagre
-    const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
-      flowNodes,
-      flowEdges,
-      laneList
-    );
-    
-    setNodes(layoutedNodes);
-    setEdges(layoutedEdges);
-    
-    // Fit view after a short delay to allow React Flow to render
-    setTimeout(() => {
-      callbacksRef.current.fitView({ padding: 0.15, duration: 300 });
-    }, 100);
+    // Set nodes and edges directly - use stored positions, don't auto-layout
+    // Auto-layout is only applied when user clicks "Auto Layout" button
+    setNodes(flowNodes);
+    setEdges(flowEdges);
   // Note: We use callbacksRef for getStepWasteTypes, getStepPriorityScore, getLinkedSolution
   // to avoid infinite loops caused by callback reference changes.
   // The data signature check prevents unnecessary updates when data hasn't changed.
