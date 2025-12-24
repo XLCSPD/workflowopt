@@ -658,6 +658,16 @@ function HorizontalFlowViewInner({
         setEdges(layoutedEdges);
         hasInitialLayoutRef.current = true;
         
+        // Save the Dagre-calculated positions to database so they persist
+        if (onNodePositionChange) {
+          layoutedNodes.forEach((node) => {
+            const data = node.data as FlowStepData;
+            if (data.isFutureState) {
+              onNodePositionChange(node.id, node.position);
+            }
+          });
+        }
+        
         // Fit view after initial layout
         setTimeout(() => {
           callbacksRef.current.fitView({ padding: 0.15, duration: 300 });
@@ -814,10 +824,20 @@ function HorizontalFlowViewInner({
     const { nodes: layoutedNodes } = getLayoutedElements(nodes, edges, laneList);
     setNodes(layoutedNodes);
     
+    // Save the new positions to database
+    if (onNodePositionChange) {
+      layoutedNodes.forEach((node) => {
+        const data = node.data as FlowStepData;
+        if (data.isFutureState) {
+          onNodePositionChange(node.id, node.position);
+        }
+      });
+    }
+    
     setTimeout(() => {
       fitView({ padding: 0.15, duration: 300 });
     }, 50);
-  }, [nodes, edges, setNodes, fitView]);
+  }, [nodes, edges, setNodes, fitView, onNodePositionChange]);
 
   // Handle node click - only allow clicks on future state nodes
   const handleNodeClick = useCallback(
