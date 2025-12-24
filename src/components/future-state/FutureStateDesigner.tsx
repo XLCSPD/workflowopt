@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { getSupabaseClient } from "@/lib/supabase/client";
 import { StageLanding } from "./StudioShell";
 import { StepDesignPanel } from "./StepDesignPanel";
-import { WorkflowContextPanel } from "./WorkflowContextPanel";
+// WorkflowContextPanel removed - redundant in Future State view
 import { StepImpactSummary } from "./StepImpactSummary";
 import { SessionContextHeader } from "./SessionContextHeader";
 import { HorizontalFlowView } from "./HorizontalFlowView";
@@ -29,11 +29,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
+// Collapsible removed - context panel no longer used
 import {
   Layout,
   Loader2,
@@ -44,8 +40,6 @@ import {
   Pencil,
   AlertCircle,
   CheckCircle2,
-  ChevronLeft,
-  ChevronRight,
   AlertTriangle,
   Lightbulb,
   Workflow,
@@ -110,7 +104,6 @@ export function FutureStateDesigner({
   const [viewMode, setViewMode] = useState<"side-by-side" | "future-only" | "flowchart">("flowchart");
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [stepDesignPanelOpen, setStepDesignPanelOpen] = useState(false);
-  const [contextPanelOpen, setContextPanelOpen] = useState(true);
   const [highlightedStepId, setHighlightedStepId] = useState<string | null>(null);
   const [isMobile, setIsMobile] = useState(false);
 
@@ -137,12 +130,6 @@ export function FutureStateDesigner({
   }, []);
 
   // Auto-collapse context panel on mobile
-  useEffect(() => {
-    if (isMobile) {
-      setContextPanelOpen(false);
-    }
-  }, [isMobile]);
-
   // Realtime studio for future use with presence/cursors
   void _realtimeStudio;
   const supabase = getSupabaseClient();
@@ -321,13 +308,6 @@ export function FutureStateDesigner({
     fetchLanesAndAnnotations();
   }, [selectedFutureState?.id, supabase]);
 
-  // Auto-collapse context panel in flowchart mode (flowchart has its own context)
-  useEffect(() => {
-    if (viewMode === "flowchart") {
-      setContextPanelOpen(false);
-    }
-  }, [viewMode]);
-
   // Run design agent
   const handleRunDesign = async () => {
     setIsRunning(true);
@@ -452,14 +432,6 @@ export function FutureStateDesigner({
     setSelectedNodeId(nodeId);
     setStepDesignPanelOpen(true);
   }, []);
-
-  // Handle clicking on a step in the context panel (memoized)
-  const handleContextStepClick = useCallback((stepId: string) => {
-    setHighlightedStepId(stepId);
-    // Clear highlight after 2 seconds
-    setTimeout(() => setHighlightedStepId(null), 2000);
-  }, []);
-
   // Handle node update (refresh the graph)
   const handleNodeUpdated = async () => {
     if (selectedFutureState) {
@@ -882,46 +854,7 @@ export function FutureStateDesigner({
           </CardContent>
         </Card>
       ) : selectedFutureState ? (
-        <div className="flex flex-col md:flex-row gap-4 mt-4">
-          {/* Left Sidebar - Workflow Context Panel (hidden on mobile) */}
-          <Collapsible
-            open={contextPanelOpen}
-            onOpenChange={setContextPanelOpen}
-            className="flex-shrink-0 hidden md:block"
-          >
-            <div className="flex items-start">
-              <CollapsibleContent className="w-56">
-                <Card className="h-[calc(100vh-400px)] min-h-[400px]">
-                  <CardContent className="p-3 h-full">
-                    <WorkflowContextPanel
-                      sessionId={sessionId}
-                      currentSteps={currentSteps}
-                      connections={connections}
-                      observations={observations}
-                      onStepClick={handleContextStepClick}
-                      highlightedStepId={highlightedStepId}
-                      impactedStepIds={impactedStepIds}
-                      onViewSession={() => router.push(`/sessions/${sessionId}`)}
-                    />
-                  </CardContent>
-                </Card>
-              </CollapsibleContent>
-              <CollapsibleTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-8 w-6 p-0 rounded-l-none border border-l-0"
-                >
-                  {contextPanelOpen ? (
-                    <ChevronLeft className="h-4 w-4" />
-                  ) : (
-                    <ChevronRight className="h-4 w-4" />
-                  )}
-                </Button>
-              </CollapsibleTrigger>
-            </div>
-          </Collapsible>
-
+        <div className="flex flex-col gap-4 mt-4">
           {/* Main Content */}
           <div className="flex-1 space-y-4 min-w-0">
             {/* View Mode Toggle */}
