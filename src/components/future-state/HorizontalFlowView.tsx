@@ -492,8 +492,10 @@ function HorizontalFlowViewInner({
 
     // Skip if data hasn't actually changed (prevents infinite loops from callback reference changes)
     if (prevDataSignatureRef.current === dataSignature) {
+      console.log("[HorizontalFlowView] Skipping update - data unchanged");
       return;
     }
+    console.log("[HorizontalFlowView] Data changed - rebuilding nodes. Nodes:", futureStateNodes.length, "Edges:", futureStateEdges.length);
     prevDataSignatureRef.current = dataSignature;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -132,6 +132,13 @@ export async function POST(request: NextRequest) {
 
     if (insertError) {
       console.error("Error creating edge:", insertError);
+      // Check if it's an RLS policy violation
+      if (insertError.code === "42501") {
+        return NextResponse.json(
+          { error: "Permission denied - RLS policy needs to allow edge creation" },
+          { status: 403 }
+        );
+      }
       return NextResponse.json(
         { error: "Failed to create edge" },
         { status: 500 }

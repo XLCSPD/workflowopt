@@ -260,6 +260,7 @@ export function FutureStateDesigner({
 
   // Fetch single future state with graph
   const fetchFutureStateGraph = async (futureStateId: string) => {
+    console.log("[fetchFutureStateGraph] Fetching graph for:", futureStateId);
     const { data, error } = await supabase
       .from("future_states")
       .select(`
@@ -271,10 +272,11 @@ export function FutureStateDesigner({
       .single();
 
     if (error) {
-      console.error("Error fetching future state graph:", error);
+      console.error("[fetchFutureStateGraph] Error:", error);
       return;
     }
 
+    console.log("[fetchFutureStateGraph] Got data - nodes:", data?.nodes?.length, "edges:", data?.edges?.length);
     setSelectedFutureState(data as FutureStateWithGraph);
   };
 
