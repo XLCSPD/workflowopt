@@ -19,6 +19,8 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { futureStateId, sourceNodeId, targetNodeId, label } = body;
 
+    console.log("[POST edges] Request body:", { futureStateId, sourceNodeId, targetNodeId, label });
+
     if (!futureStateId || !sourceNodeId || !targetNodeId) {
       return NextResponse.json(
         { error: "Missing required fields: futureStateId, sourceNodeId, targetNodeId" },
@@ -34,26 +36,29 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Verify the future state exists and is not locked
+    // Verify the future state exists
+    // Note: is_locked column may not exist until migration is applied
     const { data: futureState, error: fsError } = await supabase
       .from("future_states")
-      .select("id, is_locked")
+      .select("id, session_id")
       .eq("id", futureStateId)
       .single();
 
     if (fsError || !futureState) {
+      console.error("Future state lookup error:", fsError);
       return NextResponse.json(
         { error: "Future state not found" },
         { status: 404 }
       );
     }
 
-    if (futureState.is_locked) {
-      return NextResponse.json(
-        { error: "Future state is locked and cannot be modified" },
-        { status: 403 }
-      );
-    }
+    // Note: is_locked check will be enabled after migration is applied
+    // if (futureState.is_locked) {
+    //   return NextResponse.json(
+    //     { error: "Future state is locked and cannot be modified" },
+    //     { status: 403 }
+    //   );
+    // }
 
     // Verify both nodes exist and belong to this future state
     const { data: nodes, error: nodesError } = await supabase
@@ -169,23 +174,25 @@ export async function PATCH(request: NextRequest) {
     }
 
     // Get the edge and verify it exists
+    // Note: is_locked column may not exist until migration is applied
     const { data: existingEdge, error: fetchError } = await supabase
       .from("future_state_edges")
-      .select("*, future_state:future_states(id, is_locked)")
+      .select("*")
       .eq("id", edgeId)
       .single();
 
     if (fetchError || !existingEdge) {
+      console.error("Edge lookup error:", fetchError);
       return NextResponse.json({ error: "Edge not found" }, { status: 404 });
     }
 
-    // Check if future state is locked
-    if (existingEdge.future_state?.is_locked) {
-      return NextResponse.json(
-        { error: "Future state is locked and cannot be modified" },
-        { status: 403 }
-      );
-    }
+    // Note: is_locked check will be enabled after migration is applied
+    // if (existingEdge.future_state?.is_locked) {
+    //   return NextResponse.json(
+    //     { error: "Future state is locked and cannot be modified" },
+    //     { status: 403 }
+    //   );
+    // }
 
     // Build update object
     const updateData: Record<string, unknown> = {
@@ -247,23 +254,25 @@ export async function DELETE(request: NextRequest) {
     }
 
     // Get the edge and verify it exists
+    // Note: is_locked column may not exist until migration is applied
     const { data: existingEdge, error: fetchError } = await supabase
       .from("future_state_edges")
-      .select("*, future_state:future_states(id, is_locked)")
+      .select("*")
       .eq("id", edgeId)
       .single();
 
     if (fetchError || !existingEdge) {
+      console.error("Edge lookup error for delete:", fetchError);
       return NextResponse.json({ error: "Edge not found" }, { status: 404 });
     }
 
-    // Check if future state is locked
-    if (existingEdge.future_state?.is_locked) {
-      return NextResponse.json(
-        { error: "Future state is locked and cannot be modified" },
-        { status: 403 }
-      );
-    }
+    // Note: is_locked check will be enabled after migration is applied
+    // if (existingEdge.future_state?.is_locked) {
+    //   return NextResponse.json(
+    //     { error: "Future state is locked and cannot be modified" },
+    //     { status: 403 }
+    //   );
+    // }
 
     // Delete the edge
     const { error: deleteError } = await supabase

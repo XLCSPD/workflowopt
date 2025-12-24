@@ -395,20 +395,17 @@ export async function GET(request: NextRequest) {
 
     if (sessionId) {
       // Get all versions for a session (without full graph)
+      // Note: description, is_locked, parent_version_id columns may not exist until migration is applied
       const { data: versions, error } = await supabase
         .from("future_states")
         .select(`
           id,
           name,
-          description,
           version,
           status,
-          is_locked,
-          parent_version_id,
           created_by,
           created_at,
-          updated_at,
-          creator:users!future_states_created_by_fkey(id, email)
+          updated_at
         `)
         .eq("session_id", sessionId)
         .order("version", { ascending: false });
