@@ -376,6 +376,8 @@ function HorizontalFlowViewInner({
 
   // Track if we've initialized the nodes to prevent infinite loops
   const prevDataSignatureRef = useRef<string>("");
+  // Track if we've done initial layout - only do it once per session
+  const hasInitialLayoutRef = useRef<boolean>(false);
   
   // Store callback refs to avoid triggering useEffect when callbacks change
   const callbacksRef = useRef({
@@ -630,8 +632,44 @@ function HorizontalFlowViewInner({
       }));
     }
 
-    // Set nodes and edges directly - use stored positions, don't auto-layout
-    // Auto-layout is only applied when user clicks "Auto Layout" button
+    // Check if this is the first time loading and nodes need initial layout
+    // Only apply Dagre layout once - on first load when nodes don't have positions
+    if (!hasInitialLayoutRef.current) {
+      // Check if most nodes have no stored position
+      const nodesWithoutPosition = flowNodes.filter(n => {
+        const data = n.data as FlowStepData;
+        if (data.isFutureState) {
+          const fsNode = futureStateNodes.find(fn => fn.id === n.id);
+          return !fsNode?.position_x || fsNode.position_x === 0;
+        }
+        return false;
+      });
+      
+      const needsInitialLayout = nodesWithoutPosition.length > flowNodes.length / 2;
+      
+      if (needsInitialLayout && flowNodes.length > 0) {
+        // Apply Dagre layout for initial positioning
+        const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
+          flowNodes,
+          flowEdges,
+          laneList
+        );
+        setNodes(layoutedNodes);
+        setEdges(layoutedEdges);
+        hasInitialLayoutRef.current = true;
+        
+        // Fit view after initial layout
+        setTimeout(() => {
+          callbacksRef.current.fitView({ padding: 0.15, duration: 300 });
+        }, 100);
+        return;
+      }
+      
+      // Mark as initialized even if we didn't need layout
+      hasInitialLayoutRef.current = true;
+    }
+    
+    // After initial layout, always preserve stored positions
     setNodes(flowNodes);
     setEdges(flowEdges);
   // Note: We use callbacksRef for getStepWasteTypes, getStepPriorityScore, getLinkedSolution
