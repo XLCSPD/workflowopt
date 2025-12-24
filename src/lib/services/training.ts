@@ -162,6 +162,10 @@ export async function getTrainingContentWithProgress(): Promise<TrainingContentW
 
   const progressMap = new Map(progress.map(p => [p.content_id, p]));
 
+  // Identify "App Overview" modules - these are always available (never locked)
+  const isAppOverviewModule = (title: string) => 
+    title.toLowerCase().includes("app overview");
+
   // Determine status based on order and completion
   const result: TrainingContentWithProgress[] = [];
   let previousCompleted = true;
@@ -174,7 +178,8 @@ export async function getTrainingContentWithProgress(): Promise<TrainingContentW
       status = "completed";
     } else if (itemProgress) {
       status = "in_progress";
-    } else if (previousCompleted) {
+    } else if (previousCompleted || isAppOverviewModule(item.title)) {
+      // App Overview modules are always available, regardless of prior completion
       status = "available";
     } else {
       status = "locked";
@@ -187,7 +192,10 @@ export async function getTrainingContentWithProgress(): Promise<TrainingContentW
     });
 
     // Update previousCompleted for next iteration
-    previousCompleted = itemProgress?.completed || false;
+    // App Overview modules don't affect the lock chain for other modules
+    if (!isAppOverviewModule(item.title)) {
+      previousCompleted = itemProgress?.completed || false;
+    }
   }
 
   return result;

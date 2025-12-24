@@ -37,12 +37,34 @@ import {
   Lightbulb,
   AlertTriangle,
   Loader2,
+  GraduationCap,
+  GitBranch,
+  Users,
+  Sparkles,
+  Rocket,
+  ArrowRight,
+  ClipboardList,
   type LucideIcon,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { markTrainingComplete, getTrainingContentById } from "@/lib/services/training";
+import { PdfSlideDeck, LabInstructionsPanel, type LabInstructions } from "@/components/training";
 import type { TrainingContent } from "@/types";
+
+// PDF Deck content type
+interface PdfDeckContent {
+  deckType: "pdf";
+  pdfUrls: string[];
+  title?: string;
+  lab?: LabInstructions;
+}
+
+// Enhanced slides content type
+interface EnhancedDeckContent {
+  deckType?: "enhanced";
+  slides: EnhancedSlide[];
+}
 
 // Supabase Storage URL
 const SUPABASE_STORAGE_URL = "https://rnmgqwsujxqvsdlfdscw.supabase.co/storage/v1/object/public";
@@ -59,18 +81,42 @@ const iconMap: Record<string, LucideIcon> = {
   "target": Target,
   "lightbulb": Lightbulb,
   "alert": AlertTriangle,
+  "graduation-cap": GraduationCap,
+  "git-branch": GitBranch,
+  "users": Users,
+  "sparkles": Sparkles,
+  "rocket": Rocket,
+  "clipboard-list": ClipboardList,
+  "arrow-right": ArrowRight,
+  "check-circle": CheckCircle,
 };
 
 // Color mapping for waste type badges
+// Brand-only waste badge colors - mapped to Versatex palette
 const wasteColors: Record<string, string> = {
-  red: "bg-red-500/10 text-red-600 border-red-500/30",
-  orange: "bg-orange-500/10 text-orange-600 border-orange-500/30",
-  yellow: "bg-yellow-500/10 text-yellow-600 border-yellow-500/30",
-  purple: "bg-purple-500/10 text-purple-600 border-purple-500/30",
-  blue: "bg-blue-500/10 text-blue-600 border-blue-500/30",
-  teal: "bg-teal-500/10 text-teal-600 border-teal-500/30",
-  indigo: "bg-indigo-500/10 text-indigo-600 border-indigo-500/30",
-  pink: "bg-pink-500/10 text-pink-600 border-pink-500/30",
+  gold: "bg-brand-gold/15 text-brand-gold border-brand-gold/40",
+  navy: "bg-brand-navy/15 text-brand-navy border-brand-navy/40",
+  emerald: "bg-brand-emerald/15 text-brand-emerald border-brand-emerald/40",
+  charcoal: "bg-brand-charcoal/15 text-brand-charcoal border-brand-charcoal/40",
+};
+
+// Feature color gradients for modern slides
+// Brand-only feature showcase colors - Versatex palette
+const featureColors: Record<string, { bg: string; icon: string; border: string }> = {
+  gold: { bg: "from-brand-gold/10 to-brand-gold/5", icon: "text-brand-gold", border: "border-brand-gold/30" },
+  navy: { bg: "from-brand-navy/10 to-brand-navy/5", icon: "text-brand-navy", border: "border-brand-navy/30" },
+  emerald: { bg: "from-brand-emerald/10 to-brand-emerald/5", icon: "text-brand-emerald", border: "border-brand-emerald/30" },
+  charcoal: { bg: "from-brand-charcoal/10 to-brand-charcoal/5", icon: "text-brand-charcoal", border: "border-brand-charcoal/30" },
+};
+
+// Journey phase colors
+// Brand color palette for phases - using only Versatex brand colors
+const phaseColors: Record<string, string> = {
+  gold: "bg-brand-gold",
+  navy: "bg-brand-navy",
+  emerald: "bg-brand-emerald",
+  charcoal: "bg-brand-charcoal",
+  platinum: "bg-brand-platinum",
 };
 
 // Slide type definitions
@@ -94,15 +140,19 @@ interface ContextSlide extends SlideBase {
 interface OverviewSlide extends SlideBase {
   layout: "overview";
   intro: string;
-  columns: {
+  columns?: {
     header: string;
     items: { letter: string; name: string; desc: string }[];
   }[];
+  // Alternative format: simple items list (for TIMWOODS slides)
+  subtitle?: string;
+  items?: { icon: string; name: string; description: string }[];
 }
 
 interface SplitCardSlide extends SlideBase {
   layout: "split-card";
-  cards: {
+  // Original format: cards array for DOWNTIME slides
+  cards?: {
     letter: string;
     name: string;
     color: string;
@@ -110,12 +160,24 @@ interface SplitCardSlide extends SlideBase {
     examples: string[];
     impact: string;
   }[];
+  // New format: description + wasteExample for feature deep-dive slides
+  description?: string;
+  wasteExample?: {
+    title: string;
+    color: string;
+    items: { icon: string; label: string; text: string }[];
+  };
 }
 
 interface EmergingSlide extends SlideBase {
   layout: "emerging";
-  intro: string;
-  wastes: { icon: string; name: string; desc: string; impact: string }[];
+  intro?: string;
+  // Original format: wastes array
+  wastes?: { icon: string; name: string; desc: string; impact: string }[];
+  // New format: subtitle + impact + examples
+  subtitle?: string;
+  impact?: string;
+  examples?: { label: string; text: string }[];
 }
 
 interface ActionSlide extends SlideBase {
@@ -131,7 +193,30 @@ interface ConclusionSlide extends SlideBase {
   cta: string;
 }
 
-type EnhancedSlide = TitleSlide | ContextSlide | OverviewSlide | SplitCardSlide | EmergingSlide | ActionSlide | ConclusionSlide;
+// New modern slide types for App Overview
+interface JourneySlide extends SlideBase {
+  layout: "journey";
+  intro: string;
+  phases: { number: string; icon: string; name: string; desc: string; color: string }[];
+}
+
+interface FeatureShowcaseSlide extends SlideBase {
+  layout: "feature-showcase";
+  subtitle: string;
+  icon: string;
+  description: string;
+  highlights: string[];
+  color: string;
+}
+
+interface HandsOnSlide extends SlideBase {
+  layout: "hands-on";
+  subtitle: string;
+  intro: string;
+  labSteps: { step: string; action: string; detail: string }[];
+}
+
+type EnhancedSlide = TitleSlide | ContextSlide | OverviewSlide | SplitCardSlide | EmergingSlide | ActionSlide | ConclusionSlide | JourneySlide | FeatureShowcaseSlide | HandsOnSlide;
 
 // Training data
 const trainingData = {
@@ -389,6 +474,256 @@ By recognizing these digital-specific wastes alongside traditional DOWNTIME wast
       ],
     },
   },
+  // App Overview Guided Walkthrough - Comprehensive Enhanced Slides
+  "app-overview": {
+    id: "app-overview",
+    title: "ProcessOpt App Overview (Guided Walkthrough)",
+    type: "slides",
+    content: {
+      slides: [
+        // SLIDE 1: Title
+        {
+          layout: "title",
+          title: "ProcessOpt",
+          subtitle: "AI-Powered Lean Process Optimization",
+          tagline: "Identify waste • Quantify impact • Design the future state",
+        },
+        // SLIDE 2: What is ProcessOpt
+        {
+          layout: "context",
+          title: "What is ProcessOpt?",
+          intro: "ProcessOpt is an AI-powered platform that helps organizations identify waste in their workflows and design optimized future states using Lean methodology.",
+          bullets: [
+            { icon: "target", label: "Find Hidden Waste", text: "Structured waste walks with the TIMWOODS framework uncover the 40% of work time lost to invisible process friction" },
+            { icon: "brain", label: "AI-Powered Analysis", text: "Machine learning synthesizes team observations to surface root causes and generate prioritized recommendations" },
+            { icon: "rocket", label: "Design Future States", text: "Transform scattered insights into actionable roadmaps with side-by-side current vs. future state visualization" },
+          ],
+        },
+        // SLIDE 3: The TIMWOODS Framework
+        {
+          layout: "overview",
+          title: "The 8 Wastes: TIMWOODS",
+          subtitle: "The foundation of Lean waste identification",
+          intro: "TIMWOODS is a mnemonic for the 8 types of process waste. Master these to spot inefficiencies hiding in plain sight.",
+          items: [
+            { icon: "unplug", name: "Transportation", description: "Unnecessary movement of materials or information (email chains, file transfers)" },
+            { icon: "package-x", name: "Inventory", description: "Excess work-in-progress, backlogs, or queued requests waiting to be processed" },
+            { icon: "trending-down", name: "Motion", description: "Unnecessary movement of people (walking to printers, searching through folders)" },
+            { icon: "eye-off", name: "Waiting", description: "Idle time and delays from approval bottlenecks, system loading, or handoff gaps" },
+          ],
+        },
+        // SLIDE 4: TIMWOODS continued
+        {
+          layout: "overview",
+          title: "The 8 Wastes: TIMWOODS (cont.)",
+          subtitle: "The remaining four waste types",
+          intro: "These wastes often hide in knowledge work and digital processes—they're less visible but equally impactful.",
+          items: [
+            { icon: "factory", name: "Overproduction", description: "Producing more than needed: unused reports, extra copies, features nobody uses" },
+            { icon: "zap", name: "Overprocessing", description: "Doing more work than required: excessive approvals, over-documentation, redundant checks" },
+            { icon: "alert", name: "Defects", description: "Errors requiring rework or correction: data entry mistakes, returns, failed handoffs" },
+            { icon: "brain", name: "Skills Underutilization", description: "Not leveraging employee capabilities: manual tasks that could be automated, siloed expertise" },
+          ],
+        },
+        // SLIDE 5: The ProcessOpt Methodology
+        {
+          layout: "journey",
+          title: "The ProcessOpt Methodology",
+          intro: "A structured four-phase approach takes you from training through to optimized process design. Each phase builds on the previous.",
+          phases: [
+            { number: "1", icon: "graduation-cap", name: "Learn", desc: "Complete training modules on waste identification and the TIMWOODS framework", color: "gold" },
+            { number: "2", icon: "git-branch", name: "Define", desc: "Create visual workflow maps with swimlanes, steps, and context for AI", color: "navy" },
+            { number: "3", icon: "users", name: "Analyze", desc: "Run collaborative waste walk sessions to capture observations", color: "emerald" },
+            { number: "4", icon: "sparkles", name: "Optimize", desc: "Use Future State Studio for AI synthesis and process redesign", color: "gold" },
+          ],
+        },
+        // SLIDE 6: User Roles
+        {
+          layout: "context",
+          title: "User Roles & Permissions",
+          intro: "ProcessOpt supports three user roles, each with specific capabilities to support your organization's improvement efforts.",
+          bullets: [
+            { icon: "users", label: "Participant", text: "Join sessions, tag waste observations, complete training modules, and contribute insights during waste walks" },
+            { icon: "clipboard-list", label: "Facilitator", text: "All Participant permissions plus create/manage sessions and workflows, view analytics, and guide teams" },
+            { icon: "lightbulb", label: "Admin", text: "Full access including user management, organization settings, waste type configuration, and training content" },
+          ],
+        },
+        // SLIDE 7: Training Module Deep Dive
+        {
+          layout: "split-card",
+          title: "Training Module",
+          description: "The Training Hub ensures all team members understand waste identification methodology before conducting waste walks.",
+          wasteExample: {
+            title: "Training Structure",
+            color: "gold",
+            items: [
+              { icon: "graduation-cap", label: "Getting Started", text: "Introduction to Lean, 8 Wastes Overview, Using ProcessOpt" },
+              { icon: "target", label: "Deep Dive Modules", text: "Individual waste type courses with examples and scenarios" },
+              { icon: "zap", label: "Assessments", text: "Knowledge quizzes with immediate feedback and retry options" },
+              { icon: "lightbulb", label: "Cheat Sheet", text: "Printable quick-reference guide for use during waste walks" },
+            ],
+          },
+        },
+        // SLIDE 8: Workflow Builder Deep Dive
+        {
+          layout: "split-card",
+          title: "Workflow Builder",
+          description: "Define the processes you want to analyze. A workflow is the foundation for all waste identification activities.",
+          wasteExample: {
+            title: "Key Capabilities",
+            color: "navy",
+            items: [
+              { icon: "git-branch", label: "Swimlane Diagrams", text: "Add horizontal lanes for departments (Customer, Sales, Finance, etc.)" },
+              { icon: "target", label: "Process Steps", text: "Define actions with drag-and-drop positioning and connection arrows" },
+              { icon: "brain", label: "Context Drawer", text: "Add stakeholders, systems, metrics, and overview for AI understanding" },
+              { icon: "sparkles", label: "AI Quick Fill", text: "Enter a description and let AI generate structured context automatically" },
+            ],
+          },
+        },
+        // SLIDE 9: Waste Walk Sessions Deep Dive
+        {
+          layout: "split-card",
+          title: "Waste Walk Sessions",
+          description: "Sessions are collaborative activities where teams systematically identify waste in a workflow with real-time observation capture.",
+          wasteExample: {
+            title: "Session Features",
+            color: "emerald",
+            items: [
+              { icon: "users", label: "Real-Time Collaboration", text: "See participant activity with live presence indicators and activity feed" },
+              { icon: "target", label: "Heatmap Overlay", text: "Visual intensity map shows waste concentration: green (low) to red (critical)" },
+              { icon: "clipboard-list", label: "Structured Observations", text: "Capture notes, waste types, priority (1-10), and attach photo evidence" },
+              { icon: "zap", label: "Session Controls", text: "Pause, end, reopen, or archive sessions as your waste walk progresses" },
+            ],
+          },
+        },
+        // SLIDE 10: Future State Studio Overview
+        {
+          layout: "context",
+          title: "Future State Studio",
+          intro: "Transform waste walk observations into an optimized future state design using a structured 6-stage AI-powered workflow.",
+          bullets: [
+            { icon: "sparkles", label: "AI Synthesis", text: "The AI analyzes all observations, groups them into themes, and identifies root cause hypotheses for each pattern" },
+            { icon: "lightbulb", label: "Solution Generation", text: "Generate actionable solutions categorized as Eliminate, Modify, or Create—each linked to specific themes" },
+            { icon: "rocket", label: "Roadmap & Design", text: "Sequence solutions into implementation waves and visualize the redesigned process with change annotations" },
+          ],
+        },
+        // SLIDE 11: The 6 Stages of Future State
+        {
+          layout: "overview",
+          title: "The 6 Stages of Future State",
+          subtitle: "From observations to implementation-ready design",
+          intro: "Each stage builds on the previous, transforming raw observations into a comprehensive improvement plan.",
+          items: [
+            { icon: "sparkles", name: "1. Synthesis Hub", description: "AI groups observations into themes with root cause hypotheses. Confirm, reject, or edit each theme." },
+            { icon: "lightbulb", name: "2. Solution Builder", description: "Generate solutions (Eliminate/Modify/Create) linked to confirmed themes. Accept or reject each proposal." },
+            { icon: "clipboard-list", name: "3. Roadmap Builder", description: "Sequence accepted solutions into implementation waves based on dependencies and complexity." },
+            { icon: "git-branch", name: "4. Designer", description: "Visualize the redesigned process with Keep/Modify/Remove/New annotations on each step." },
+          ],
+        },
+        // SLIDE 12: Future State Stages continued
+        {
+          layout: "context",
+          title: "Future State Studio (cont.)",
+          intro: "The final stages help you compare, validate, and export your work for stakeholder communication.",
+          bullets: [
+            { icon: "target", label: "5. Compare View", text: "Side-by-side visualization of current vs. future state with change highlighting and summary statistics" },
+            { icon: "rocket", label: "6. Export Panel", text: "Generate PowerPoint presentations, PDF reports, or JSON data exports for stakeholders and integrations" },
+            { icon: "brain", label: "Step Design Panel", text: "Click any future step to open AI-guided design: answer questions, review options, and refine specifications" },
+          ],
+        },
+        // SLIDE 13: Writing Good Observations
+        {
+          layout: "emerging",
+          title: "Writing Quality Observations",
+          subtitle: "The quality of your observations directly impacts AI analysis",
+          impact: "Good observations are specific, measurable, and include context about frequency, duration, and downstream effects.",
+          examples: [
+            { label: "Good ✓", text: "Invoice approval takes 3 days because it requires 2 manager signatures for amounts over $500, creating a bottleneck when managers are unavailable." },
+            { label: "Bad ✗", text: "Slow approval" },
+            { label: "Good ✓", text: "Customer service reps manually re-enter order data into 3 separate systems, averaging 4 minutes per order with a 12% error rate." },
+            { label: "Bad ✗", text: "Too much data entry" },
+          ],
+        },
+        // SLIDE 14: Heatmap & Priority Scoring
+        {
+          layout: "overview",
+          title: "Understanding the Heatmap",
+          subtitle: "Priority scores drive visual waste intensity",
+          intro: "The heatmap overlay on workflow steps shows waste concentration based on observation priority scores. Use this to identify hotspots.",
+          items: [
+            { icon: "target", name: "Green (1-3)", description: "Low waste concentration. Monitor for changes but not urgent action required." },
+            { icon: "lightbulb", name: "Yellow (4-6)", description: "Medium waste. Investigate further and consider for improvement backlog." },
+            { icon: "zap", name: "Orange (7-8)", description: "High waste. Prioritize for near-term action in your improvement plan." },
+            { icon: "alert", name: "Red (9-10)", description: "Critical waste. Urgent attention required—significant impact on operations." },
+          ],
+        },
+        // SLIDE 15: Hands-On Lab
+        {
+          layout: "hands-on",
+          title: "Hands-On Lab",
+          subtitle: "Build Your First Complete Cycle",
+          intro: "Practice the full ProcessOpt workflow by creating a demo 'Request → Approve → Fulfill' process.",
+          labSteps: [
+            { step: "1", action: "Create Workflow", detail: "Go to Workflows → New Workflow. Name it 'Demo: Request to Fulfillment' and add 3 swimlanes: Requester, Approver, Operations" },
+            { step: "2", action: "Add 10 Process Steps", detail: "Submit Request → Validate Data → Clarify Details → Log Request → Review Requirements → Approve/Reject → Notify Requester → Fulfill Order → Confirm Delivery → Close Ticket" },
+            { step: "3", action: "Add Context", detail: "Open the Context Drawer (📋). Add stakeholders, systems used (email, ticketing system), and metrics (current cycle time: 5 days)" },
+            { step: "4", action: "Start Waste Walk", detail: "Click 'Start Session' from the workflow. Invite a colleague or work solo to log observations." },
+            { step: "5", action: "Log 5 Observations", detail: "Examples: Waiting between Submit and Validate (2 days); Manual re-entry in Log step (Defects); Multiple approval layers (Overprocessing)" },
+            { step: "6", action: "Run AI Synthesis", detail: "Open Future State Studio → Run Synthesis → Review themes → Confirm valid themes → Generate Solutions" },
+          ],
+        },
+        // SLIDE 16: Best Practices for Facilitators
+        {
+          layout: "context",
+          title: "Best Practices: Facilitators",
+          intro: "As a session facilitator, your preparation and guidance directly impact the quality of waste identification.",
+          bullets: [
+            { icon: "clipboard-list", label: "Prepare Thoroughly", text: "Ensure workflow is complete and accurate. Add rich context for AI. Invite all relevant stakeholders before the session." },
+            { icon: "users", label: "Guide the Session", text: "Encourage all participants to contribute. Ask probing questions. Document specific examples, not generalities." },
+            { icon: "target", label: "Quality Over Quantity", text: "Focus on detailed, actionable observations. Include impact statements: how does this waste affect customers or employees?" },
+          ],
+        },
+        // SLIDE 17: Best Practices for Participants
+        {
+          layout: "context",
+          title: "Best Practices: Participants",
+          intro: "Participants drive the waste walk's success. Come prepared and observe objectively for the best results.",
+          bullets: [
+            { icon: "graduation-cap", label: "Come Prepared", text: "Complete training modules first. Review the waste cheat sheet. Understand the process being analyzed before the session." },
+            { icon: "target", label: "Observe Objectively", text: "Focus on the process, not people. Look for systemic issues. Consider upstream and downstream effects of waste." },
+            { icon: "lightbulb", label: "Provide Context", text: "Explain why something is wasteful. Include frequency and duration. Note any workarounds currently being used." },
+          ],
+        },
+        // SLIDE 18: Quick Start Summary
+        {
+          layout: "action",
+          title: "Your 30-Minute Quick Start",
+          subtitle: "Get results in your first session",
+          intro: "Follow these four steps to complete a full optimization cycle and see immediate value from ProcessOpt.",
+          steps: [
+            { number: "1", title: "Pick a Process", desc: "Choose a frustrating, repetitive process your team knows well. Start with 5-15 steps across 2-4 swimlanes." },
+            { number: "2", title: "Map & Add Context", desc: "Create the workflow with accurate steps. Use the Context Drawer to add stakeholders, systems, and current metrics." },
+            { number: "3", title: "Walk & Observe", desc: "Spend 20 minutes with your team logging observations. Tag waste types and rate priority. Aim for 5-10 quality observations." },
+            { number: "4", title: "Synthesize & Design", desc: "Run AI synthesis to find patterns. Confirm themes, generate solutions, and visualize your future state design." },
+          ],
+        },
+        // SLIDE 19: Conclusion
+        {
+          layout: "conclusion",
+          title: "You're Ready to Optimize!",
+          points: [
+            "ProcessOpt implements Lean methodology with AI-powered analysis",
+            "The 8 wastes (TIMWOODS) are your framework for finding hidden inefficiencies",
+            "Follow the flow: Learn → Define → Analyze → Optimize",
+            "Quality observations lead to better AI insights and actionable solutions",
+            "Start small: one process, one team, one improvement—then scale",
+            "Continuous improvement compounds: small wins lead to big transformations",
+          ],
+          cta: "Head to the Workflows module and create your first process map!",
+        },
+      ],
+    },
+  },
 };
 
 // Format time in MM:SS
@@ -496,9 +831,13 @@ export default function TrainingDetailPage() {
   // Quiz state
   const [quizAnswers, setQuizAnswers] = useState<Record<string, string>>({});
 
-  // Get total slides for progress calculation
-  const slidesForProgress = trainingModule?.type === "slides" 
-    ? ((trainingModule.content as unknown) as { slides: EnhancedSlide[] }).slides 
+  // Check if this is a PDF deck (don't access slides array for PDF decks)
+  const isPdfDeckForProgress = trainingModule?.type === "slides" && 
+    (trainingModule.content as PdfDeckContent)?.deckType === "pdf";
+  
+  // Get total slides for progress calculation (only for enhanced slides, not PDF decks)
+  const slidesForProgress = trainingModule?.type === "slides" && !isPdfDeckForProgress
+    ? ((trainingModule.content as unknown) as { slides: EnhancedSlide[] })?.slides ?? []
     : [];
   const totalSlidesForProgress = slidesForProgress.length;
 
@@ -665,14 +1004,22 @@ export default function TrainingDetailPage() {
     );
   }
 
-  const slides = trainingModule.type === "slides" 
-    ? ((trainingModule.content as unknown) as { slides: EnhancedSlide[] }).slides 
+  // Determine if this is a PDF deck or enhanced slides
+  const isPdfDeck = trainingModule.type === "slides" && 
+    (trainingModule.content as PdfDeckContent)?.deckType === "pdf";
+  
+  const pdfDeckContent = isPdfDeck 
+    ? (trainingModule.content as PdfDeckContent) 
+    : null;
+  
+  const slides = trainingModule.type === "slides" && !isPdfDeck
+    ? ((trainingModule.content as unknown) as EnhancedDeckContent).slides 
     : [];
   const questions = trainingModule.type === "quiz" 
     ? ((trainingModule.content as unknown) as { questions: { id: string; text: string; options: string[]; correct: string }[] }).questions 
     : [];
   const totalSlides = slides.length;
-  const progress = trainingModule.type === "slides" ? ((currentSlide + 1) / totalSlides) * 100 : 0;
+  const progress = trainingModule.type === "slides" && !isPdfDeck ? ((currentSlide + 1) / totalSlides) * 100 : 0;
   const currentSlideData = slides[currentSlide] as EnhancedSlide | undefined;
 
   const handleQuizSubmit = async () => {
@@ -898,8 +1245,31 @@ export default function TrainingDetailPage() {
           </Card>
         )}
 
-        {/* Slides Content */}
-        {trainingModule.type === "slides" && currentSlideData && (
+        {/* PDF Slide Deck Content */}
+        {trainingModule.type === "slides" && isPdfDeck && pdfDeckContent && (
+          <div className="max-w-6xl mx-auto space-y-6">
+            <div className="grid lg:grid-cols-[1fr,350px] gap-6 h-[calc(100vh-14rem)]">
+              {/* PDF Viewer */}
+              <div className="bg-white rounded-xl border overflow-hidden">
+                <PdfSlideDeck
+                  pdfUrls={pdfDeckContent.pdfUrls}
+                  title={pdfDeckContent.title}
+                  onComplete={handleMarkComplete}
+                />
+              </div>
+              
+              {/* Lab Instructions Panel (if available) */}
+              {pdfDeckContent.lab && (
+                <div className="overflow-auto">
+                  <LabInstructionsPanel lab={pdfDeckContent.lab} />
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Enhanced Slides Content (legacy/curated decks) */}
+        {trainingModule.type === "slides" && !isPdfDeck && currentSlideData && (
           <div className="max-w-5xl mx-auto space-y-4">
             <div className="flex items-center justify-between">
               <span className="text-sm text-muted-foreground">
@@ -954,118 +1324,222 @@ export default function TrainingDetailPage() {
             )}
 
             {/* Overview Slide */}
-            {currentSlideData.layout === "overview" && (
-              <Card className="min-h-[450px]">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-3xl text-brand-navy">{currentSlideData.title}</CardTitle>
-                  <CardDescription className="text-base mt-2">
-                    {(currentSlideData as OverviewSlide).intro}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="pt-4">
-                  <div className="grid md:grid-cols-2 gap-6">
-                    {(currentSlideData as OverviewSlide).columns.map((column, colIdx) => (
-                      <div key={colIdx} className="space-y-3">
-                        <h3 className="text-xl font-bold text-brand-gold border-b-2 border-brand-gold pb-2">
-                          {column.header}
-                        </h3>
-                        <div className="space-y-2">
-                          {column.items.map((item, itemIdx) => (
-                            <div key={itemIdx} className="flex items-center gap-3 p-3 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors">
-                              <span className="flex items-center justify-center w-10 h-10 rounded-full bg-brand-navy text-white font-bold text-lg">
-                                {item.letter}
-                              </span>
-                              <div>
-                                <p className="font-semibold text-brand-charcoal">{item.name}</p>
-                                <p className="text-sm text-muted-foreground">{item.desc}</p>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Split Card Slide */}
-            {currentSlideData.layout === "split-card" && (
-              <Card className="min-h-[450px]">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-3xl text-brand-navy">{currentSlideData.title}</CardTitle>
-                </CardHeader>
-                <CardContent className="pt-4">
-                  <div className="grid md:grid-cols-2 gap-6">
-                    {(currentSlideData as SplitCardSlide).cards.map((card, cardIdx) => (
-                      <div key={cardIdx} className="rounded-xl border-2 overflow-hidden bg-card">
-                        <div className={`p-4 ${wasteColors[card.color] || wasteColors.blue} border-b`}>
-                          <div className="flex items-center gap-3">
-                            <span className="flex items-center justify-center w-12 h-12 rounded-full bg-white/80 font-bold text-2xl">
-                              {card.letter}
-                            </span>
-                            <h3 className="text-xl font-bold">{card.name}</h3>
-                          </div>
-                        </div>
-                        <div className="p-4 space-y-4">
-                          <p className="text-sm leading-relaxed">{card.definition}</p>
-                          <div>
-                            <h4 className="text-xs font-semibold uppercase text-muted-foreground mb-2">Digital Examples</h4>
-                            <div className="flex flex-wrap gap-1.5">
-                              {card.examples.map((example, exIdx) => (
-                                <Badge key={exIdx} variant="secondary" className="text-xs">
-                                  {example}
-                                </Badge>
+            {currentSlideData.layout === "overview" && (() => {
+              const overviewData = currentSlideData as OverviewSlide;
+              const hasColumns = overviewData.columns && overviewData.columns.length > 0;
+              const hasItems = overviewData.items && overviewData.items.length > 0;
+              
+              return (
+                <Card className="min-h-[450px] bg-gradient-to-br from-brand-platinum/50 to-white">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-3xl text-brand-navy">{currentSlideData.title}</CardTitle>
+                    {overviewData.subtitle && (
+                      <p className="text-lg font-medium text-brand-gold">{overviewData.subtitle}</p>
+                    )}
+                    <CardDescription className="text-base mt-2 text-brand-charcoal">
+                      {overviewData.intro}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="pt-4">
+                    {/* Original columns format (DOWNTIME slide 2) */}
+                    {hasColumns && (
+                      <div className="grid md:grid-cols-2 gap-6">
+                        {overviewData.columns!.map((column, colIdx) => (
+                          <div key={colIdx} className="space-y-3">
+                            <h3 className="text-xl font-bold text-brand-gold border-b-2 border-brand-gold pb-2">
+                              {column.header}
+                            </h3>
+                            <div className="space-y-2">
+                              {column.items.map((item, itemIdx) => (
+                                <div key={itemIdx} className="flex items-center gap-3 p-3 rounded-lg bg-white hover:bg-brand-gold/5 border border-brand-gold/10 transition-colors">
+                                  <span className="flex items-center justify-center w-10 h-10 rounded-full bg-brand-navy text-white font-bold text-lg">
+                                    {item.letter}
+                                  </span>
+                                  <div>
+                                    <p className="font-semibold text-brand-charcoal">{item.name}</p>
+                                    <p className="text-sm text-brand-charcoal/70">{item.desc}</p>
+                                  </div>
+                                </div>
                               ))}
                             </div>
                           </div>
-                          <div className="pt-2 border-t">
-                            <p className="text-xs text-muted-foreground italic">
-                              <span className="font-semibold text-brand-charcoal">Impact:</span> {card.impact}
-                            </p>
+                        ))}
+                      </div>
+                    )}
+                    {/* New items format (TIMWOODS slides) */}
+                    {hasItems && (
+                      <div className="grid md:grid-cols-2 gap-4">
+                        {overviewData.items!.map((item, idx) => {
+                          const IconComponent = iconMap[item.icon] || Target;
+                          return (
+                            <div key={idx} className="flex items-start gap-4 p-4 rounded-xl bg-white border border-brand-gold/20 hover:border-brand-gold/40 hover:shadow-md transition-all">
+                              <div className="flex items-center justify-center w-12 h-12 rounded-lg bg-brand-navy shrink-0">
+                                <IconComponent className="h-6 w-6 text-brand-gold" />
+                              </div>
+                              <div>
+                                <h4 className="font-bold text-brand-navy text-lg">{item.name}</h4>
+                                <p className="text-sm text-brand-charcoal/80 mt-1 leading-relaxed">{item.description}</p>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              );
+            })()}
+
+            {/* Split Card Slide */}
+            {currentSlideData.layout === "split-card" && (() => {
+              const splitData = currentSlideData as SplitCardSlide;
+              const hasCards = splitData.cards && splitData.cards.length > 0;
+              const hasWasteExample = splitData.wasteExample;
+              
+              return (
+                <Card className="min-h-[450px] bg-gradient-to-br from-brand-platinum/50 to-white">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-3xl text-brand-navy">{currentSlideData.title}</CardTitle>
+                    {splitData.description && (
+                      <CardDescription className="text-base mt-2 text-brand-charcoal">
+                        {splitData.description}
+                      </CardDescription>
+                    )}
+                  </CardHeader>
+                  <CardContent className="pt-4">
+                    {/* Original cards format (DOWNTIME slides) */}
+                    {hasCards && (
+                      <div className="grid md:grid-cols-2 gap-6">
+                        {splitData.cards!.map((card, cardIdx) => (
+                          <div key={cardIdx} className="rounded-xl border-2 overflow-hidden bg-card">
+                            <div className={`p-4 ${wasteColors[card.color] || wasteColors.gold} border-b`}>
+                              <div className="flex items-center gap-3">
+                                <span className="flex items-center justify-center w-12 h-12 rounded-full bg-white/80 font-bold text-2xl">
+                                  {card.letter}
+                                </span>
+                                <h3 className="text-xl font-bold">{card.name}</h3>
+                              </div>
+                            </div>
+                            <div className="p-4 space-y-4">
+                              <p className="text-sm leading-relaxed">{card.definition}</p>
+                              <div>
+                                <h4 className="text-xs font-semibold uppercase text-muted-foreground mb-2">Digital Examples</h4>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {card.examples.map((example, exIdx) => (
+                                    <Badge key={exIdx} variant="secondary" className="text-xs">
+                                      {example}
+                                    </Badge>
+                                  ))}
+                                </div>
+                              </div>
+                              <div className="pt-2 border-t">
+                                <p className="text-xs text-muted-foreground italic">
+                                  <span className="font-semibold text-brand-charcoal">Impact:</span> {card.impact}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {/* New wasteExample format (feature deep-dive slides) */}
+                    {hasWasteExample && (
+                      <div className="space-y-4">
+                        <div className={`p-4 rounded-xl border-2 ${featureColors[splitData.wasteExample!.color]?.border || 'border-brand-gold/30'} ${featureColors[splitData.wasteExample!.color]?.bg || 'from-brand-gold/10 to-brand-gold/5'} bg-gradient-to-br`}>
+                          <h3 className="text-lg font-bold text-brand-navy mb-4">{splitData.wasteExample!.title}</h3>
+                          <div className="grid md:grid-cols-2 gap-3">
+                            {splitData.wasteExample!.items.map((item, idx) => {
+                              const IconComponent = iconMap[item.icon] || Target;
+                              return (
+                                <div key={idx} className="flex items-start gap-3 p-3 rounded-lg bg-white/80 border border-white">
+                                  <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-brand-navy shrink-0">
+                                    <IconComponent className="h-5 w-5 text-brand-gold" />
+                                  </div>
+                                  <div>
+                                    <h4 className="font-semibold text-brand-navy">{item.label}</h4>
+                                    <p className="text-sm text-brand-charcoal/80">{item.text}</p>
+                                  </div>
+                                </div>
+                              );
+                            })}
                           </div>
                         </div>
                       </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-            )}
+                    )}
+                  </CardContent>
+                </Card>
+              );
+            })()}
 
             {/* Emerging Wastes Slide */}
-            {currentSlideData.layout === "emerging" && (
-              <Card className="min-h-[450px]">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-3xl text-brand-navy">{currentSlideData.title}</CardTitle>
-                  <CardDescription className="text-base mt-2">
-                    {(currentSlideData as EmergingSlide).intro}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="pt-4">
-                  <div className="grid md:grid-cols-2 gap-4">
-                    {(currentSlideData as EmergingSlide).wastes.map((waste, wasteIdx) => {
-                      const IconComponent = iconMap[waste.icon] || AlertTriangle;
-                      return (
-                        <div key={wasteIdx} className="p-4 rounded-xl bg-gradient-to-br from-brand-navy/5 to-brand-navy/10 border border-brand-navy/20">
-                          <div className="flex items-start gap-3">
-                            <div className="p-2 rounded-lg bg-brand-navy/10">
-                              <IconComponent className="h-6 w-6 text-brand-navy" />
+            {currentSlideData.layout === "emerging" && (() => {
+              const emergingData = currentSlideData as EmergingSlide;
+              const hasWastes = emergingData.wastes && emergingData.wastes.length > 0;
+              const hasExamples = emergingData.examples && emergingData.examples.length > 0;
+              
+              return (
+                <Card className="min-h-[450px] bg-gradient-to-br from-brand-platinum/50 to-white">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-3xl text-brand-navy">{currentSlideData.title}</CardTitle>
+                    {emergingData.subtitle && (
+                      <p className="text-lg font-medium text-brand-gold">{emergingData.subtitle}</p>
+                    )}
+                    {emergingData.intro && (
+                      <CardDescription className="text-base mt-2 text-brand-charcoal">
+                        {emergingData.intro}
+                      </CardDescription>
+                    )}
+                    {emergingData.impact && (
+                      <p className="text-base mt-2 text-brand-charcoal leading-relaxed">
+                        {emergingData.impact}
+                      </p>
+                    )}
+                  </CardHeader>
+                  <CardContent className="pt-4">
+                    {/* Original wastes format */}
+                    {hasWastes && (
+                      <div className="grid md:grid-cols-2 gap-4">
+                        {emergingData.wastes!.map((waste, wasteIdx) => {
+                          const IconComponent = iconMap[waste.icon] || AlertTriangle;
+                          return (
+                            <div key={wasteIdx} className="p-4 rounded-xl bg-gradient-to-br from-brand-navy/5 to-brand-navy/10 border border-brand-navy/20">
+                              <div className="flex items-start gap-3">
+                                <div className="p-2 rounded-lg bg-brand-navy/10">
+                                  <IconComponent className="h-6 w-6 text-brand-navy" />
+                                </div>
+                                <div className="flex-1">
+                                  <h4 className="font-bold text-brand-navy">{waste.name}</h4>
+                                  <p className="text-sm text-brand-charcoal/80 mt-1">{waste.desc}</p>
+                                  <p className="text-xs text-brand-gold mt-2 font-medium">
+                                    → {waste.impact}
+                                  </p>
+                                </div>
+                              </div>
                             </div>
-                            <div className="flex-1">
-                              <h4 className="font-bold text-brand-navy">{waste.name}</h4>
-                              <p className="text-sm text-muted-foreground mt-1">{waste.desc}</p>
-                              <p className="text-xs text-brand-gold mt-2 font-medium">
-                                → {waste.impact}
-                              </p>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {/* New examples format (good/bad observation examples) */}
+                    {hasExamples && (
+                      <div className="space-y-3">
+                        {emergingData.examples!.map((example, idx) => {
+                          const isGood = example.label.toLowerCase().includes("good");
+                          return (
+                            <div key={idx} className={`p-4 rounded-xl border-2 ${isGood ? 'bg-brand-emerald/5 border-brand-emerald/30' : 'bg-brand-charcoal/5 border-brand-charcoal/20'}`}>
+                              <span className={`text-sm font-bold ${isGood ? 'text-brand-emerald' : 'text-brand-charcoal'}`}>
+                                {example.label}
+                              </span>
+                              <p className="text-brand-charcoal mt-1 leading-relaxed">{example.text}</p>
                             </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </CardContent>
-              </Card>
-            )}
+                          );
+                        })}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              );
+            })()}
 
             {/* Action Slide */}
             {currentSlideData.layout === "action" && (
@@ -1117,6 +1591,119 @@ export default function TrainingDetailPage() {
                     <p className="text-xl font-bold text-brand-navy">
                       {(currentSlideData as ConclusionSlide).cta}
                     </p>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Journey Slide - Horizontal Timeline */}
+            {currentSlideData.layout === "journey" && (
+              <Card className="min-h-[450px] bg-gradient-to-br from-brand-platinum to-white overflow-hidden">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-3xl text-brand-navy">{currentSlideData.title}</CardTitle>
+                  <CardDescription className="text-base mt-2 text-brand-charcoal">
+                    {(currentSlideData as JourneySlide).intro}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="pt-8">
+                  <div className="relative">
+                    {/* Connection line - brand gold gradient */}
+                    <div className="absolute top-8 left-0 right-0 h-1 bg-gradient-to-r from-brand-gold via-brand-emerald to-brand-navy rounded-full" />
+                    
+                    <div className="grid grid-cols-4 gap-6 relative">
+                      {(currentSlideData as JourneySlide).phases.map((phase, idx) => {
+                        const IconComponent = iconMap[phase.icon] || Target;
+                        const isGold = phase.color === "gold";
+                        return (
+                          <div key={idx} className="flex flex-col items-center text-center">
+                            <div className={`relative z-10 w-16 h-16 rounded-full ${phaseColors[phase.color] || 'bg-brand-gold'} flex items-center justify-center shadow-lg ring-4 ring-white`}>
+                              <IconComponent className={`h-7 w-7 ${isGold ? 'text-brand-navy' : 'text-white'}`} />
+                            </div>
+                            <div className="mt-4 space-y-1">
+                              <span className="text-xs font-bold text-brand-charcoal/60 uppercase tracking-wider">
+                                Phase {phase.number}
+                              </span>
+                              <h4 className="text-lg font-bold text-brand-navy">{phase.name}</h4>
+                              <p className="text-sm text-brand-charcoal/80">{phase.desc}</p>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Feature Showcase Slide */}
+            {currentSlideData.layout === "feature-showcase" && (() => {
+              const slideData = currentSlideData as FeatureShowcaseSlide;
+              const colors = featureColors[slideData.color] || featureColors.gold;
+              const IconComponent = iconMap[slideData.icon] || Target;
+              
+              return (
+                <Card className={`min-h-[450px] bg-gradient-to-br ${colors.bg} border-2 ${colors.border} overflow-hidden`}>
+                  <CardContent className="pt-8 pb-8">
+                    <div className="flex flex-col lg:flex-row gap-8 items-center">
+                      {/* Icon and Title */}
+                      <div className="lg:w-1/3 text-center lg:text-left">
+                        <div className={`inline-flex p-6 rounded-2xl bg-white shadow-lg mb-4`}>
+                          <IconComponent className={`h-16 w-16 ${colors.icon}`} />
+                        </div>
+                        <h2 className="text-3xl font-bold text-brand-navy mb-2">{slideData.title}</h2>
+                        <p className={`text-lg font-medium ${colors.icon}`}>{slideData.subtitle}</p>
+                      </div>
+                      
+                      {/* Description and Highlights */}
+                      <div className="lg:w-2/3 space-y-6">
+                        <p className="text-lg text-brand-charcoal leading-relaxed">
+                          {slideData.description}
+                        </p>
+                        <div className="grid grid-cols-2 gap-3">
+                          {slideData.highlights.map((highlight, idx) => (
+                            <div key={idx} className="flex items-center gap-3 p-3 rounded-lg bg-white/80 border border-white">
+                              <CheckCircle className={`h-5 w-5 ${colors.icon} shrink-0`} />
+                              <span className="text-sm font-medium text-brand-charcoal">{highlight}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })()}
+
+            {/* Hands-On Lab Slide */}
+            {currentSlideData.layout === "hands-on" && (
+              <Card className="min-h-[450px] bg-gradient-to-br from-brand-gold/10 via-brand-platinum to-white border-2 border-brand-gold/30">
+                <CardHeader className="pb-2">
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="p-2 rounded-lg bg-brand-gold">
+                      <ClipboardList className="h-6 w-6 text-brand-navy" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-2xl text-brand-navy">{currentSlideData.title}</CardTitle>
+                      <p className="text-brand-gold font-semibold">{(currentSlideData as HandsOnSlide).subtitle}</p>
+                    </div>
+                  </div>
+                  <CardDescription className="text-base text-brand-charcoal">
+                    {(currentSlideData as HandsOnSlide).intro}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="pt-4">
+                  <div className="grid gap-3 md:grid-cols-2">
+                    {(currentSlideData as HandsOnSlide).labSteps.map((labStep, idx) => (
+                      <div key={idx} className="flex items-start gap-3 p-4 rounded-xl bg-white border border-brand-gold/20 hover:border-brand-gold/50 hover:shadow-md transition-all">
+                        <div className="flex items-center justify-center w-9 h-9 rounded-full bg-brand-navy text-brand-gold font-bold text-sm shrink-0 shadow-sm">
+                          {labStep.step}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <h4 className="font-bold text-brand-navy">{labStep.action}</h4>
+                          <p className="text-sm text-brand-charcoal/80 mt-1 leading-snug">{labStep.detail}</p>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </CardContent>
               </Card>

@@ -139,6 +139,17 @@ export default function AdminPage() {
     type: "video" as "video" | "slides" | "article" | "quiz",
     duration_minutes: 10,
     order_index: 0,
+    // Content fields for video
+    videoUrl: "",
+    transcript: "",
+    // Content fields for PDF slides
+    deckType: "pdf" as "pdf" | "enhanced",
+    pdfUrls: [""] as string[],
+    // Lab instructions (optional)
+    labEnabled: false,
+    labWorkflowName: "",
+    labSwimlanes: "",
+    labSteps: "",
   });
 
   // Users State
@@ -317,15 +328,53 @@ export default function AdminPage() {
   // Training Content CRUD
   const handleSaveTraining = async () => {
     try {
+      // Build the content object based on type
+      let content: Record<string, unknown> = {};
+      
+      if (trainingForm.type === "video") {
+        content = {
+          videoUrl: trainingForm.videoUrl,
+          transcript: trainingForm.transcript || undefined,
+        };
+      } else if (trainingForm.type === "slides") {
+        const filteredUrls = trainingForm.pdfUrls.filter((url) => url.trim() !== "");
+        content = {
+          deckType: trainingForm.deckType,
+          pdfUrls: filteredUrls.length > 0 ? filteredUrls : undefined,
+        };
+        // Add lab instructions if enabled
+        if (trainingForm.labEnabled && trainingForm.labWorkflowName) {
+          const lab: Record<string, unknown> = {
+            workflowName: trainingForm.labWorkflowName,
+            swimlanes: trainingForm.labSwimlanes
+              .split(",")
+              .map((s) => s.trim())
+              .filter((s) => s),
+            steps: trainingForm.labSteps
+              .split("\n")
+              .map((s) => s.trim())
+              .filter((s) => s),
+            observations: [], // Can be extended later
+          };
+          content.lab = lab;
+        }
+      }
+      
+      const payload = {
+        title: trainingForm.title,
+        description: trainingForm.description,
+        type: trainingForm.type,
+        duration_minutes: trainingForm.duration_minutes,
+        order_index: trainingForm.order_index,
+        content,
+      };
+
       if (editingTraining) {
-        const updated = await updateTrainingContent(editingTraining.id, trainingForm);
+        const updated = await updateTrainingContent(editingTraining.id, payload);
         setTrainingContent(trainingContent.map((tc) => (tc.id === updated.id ? updated : tc)));
         toast({ title: "Training content updated" });
       } else {
-        const created = await createTrainingContent({
-          ...trainingForm,
-          content: JSON.stringify({}),
-        });
+        const created = await createTrainingContent(payload);
         setTrainingContent([...trainingContent, created]);
         toast({ title: "Training content created" });
       }
@@ -343,12 +392,50 @@ export default function AdminPage() {
 
   const handleEditTraining = (tc: TrainingContent) => {
     setEditingTraining(tc);
+    
+    // Parse content based on type
+    const content = tc.content as Record<string, unknown> | null;
+    
+    let videoUrl = "";
+    let transcript = "";
+    let deckType: "pdf" | "enhanced" = "pdf";
+    let pdfUrls: string[] = [""];
+    let labEnabled = false;
+    let labWorkflowName = "";
+    let labSwimlanes = "";
+    let labSteps = "";
+    
+    if (tc.type === "video" && content) {
+      videoUrl = (content.videoUrl as string) || "";
+      transcript = (content.transcript as string) || "";
+    } else if (tc.type === "slides" && content) {
+      deckType = (content.deckType as "pdf" | "enhanced") || "pdf";
+      pdfUrls = (content.pdfUrls as string[]) || [""];
+      if (pdfUrls.length === 0) pdfUrls = [""];
+      
+      const lab = content.lab as Record<string, unknown> | undefined;
+      if (lab) {
+        labEnabled = true;
+        labWorkflowName = (lab.workflowName as string) || "";
+        labSwimlanes = ((lab.swimlanes as string[]) || []).join(", ");
+        labSteps = ((lab.steps as string[]) || []).join("\n");
+      }
+    }
+    
     setTrainingForm({
       title: tc.title,
       description: tc.description || "",
       type: tc.type,
       duration_minutes: tc.duration_minutes || 10,
       order_index: tc.order_index,
+      videoUrl,
+      transcript,
+      deckType,
+      pdfUrls,
+      labEnabled,
+      labWorkflowName,
+      labSwimlanes,
+      labSteps,
     });
     setIsTrainingDialogOpen(true);
   };
@@ -376,6 +463,14 @@ export default function AdminPage() {
       type: "video",
       duration_minutes: 10,
       order_index: trainingContent.length,
+      videoUrl: "",
+      transcript: "",
+      deckType: "pdf",
+      pdfUrls: [""],
+      labEnabled: false,
+      labWorkflowName: "",
+      labSwimlanes: "",
+      labSteps: "",
     });
   };
 
@@ -1132,6 +1227,124 @@ export default function AdminPage() {
                           }
                         />
                       </div>
+
+                      {/* Video Content Fields */}
+                      {trainingForm.type === "video" && (
+                        <>
+                          <div className="space-y-2">
+                            <Label>Video URL</Label>
+                            <Input
+                              placeholder="https://... or /videos/filename.mp4"
+                              value={trainingForm.videoUrl}
+                              onChange={(e) =>
+                                setTrainingForm({
+                                  ...trainingForm,
+                                  videoUrl: e.target.value,
+                                })
+                              }
+                            />
+                            <p className="text-xs text-muted-foreground">
+                              Full URL or relative path to Supabase Storage
+                            </p>
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Transcript (optional)</Label>
+                            <Textarea
+                              placeholder="Video transcript or summary..."
+                              value={trainingForm.transcript}
+                              onChange={(e) =>
+                                setTrainingForm({
+                                  ...trainingForm,
+                                  transcript: e.target.value,
+                                })
+                              }
+                              rows={3}
+                            />
+                          </div>
+                        </>
+                      )}
+
+                      {/* Slides Content Fields */}
+                      {trainingForm.type === "slides" && (
+                        <>
+                          <div className="space-y-2">
+                            <Label>PDF URLs (one per line)</Label>
+                            <Textarea
+                              placeholder="https://storage.../file1.pdf&#10;https://storage.../file2.pdf"
+                              value={trainingForm.pdfUrls.join("\n")}
+                              onChange={(e) =>
+                                setTrainingForm({
+                                  ...trainingForm,
+                                  pdfUrls: e.target.value.split("\n"),
+                                })
+                              }
+                              rows={3}
+                            />
+                            <p className="text-xs text-muted-foreground">
+                              Add Supabase Storage URLs for PDF documents
+                            </p>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <input
+                              type="checkbox"
+                              id="labEnabled"
+                              checked={trainingForm.labEnabled}
+                              onChange={(e) =>
+                                setTrainingForm({
+                                  ...trainingForm,
+                                  labEnabled: e.target.checked,
+                                })
+                              }
+                              className="h-4 w-4 rounded border-gray-300"
+                            />
+                            <Label htmlFor="labEnabled">Include hands-on lab instructions</Label>
+                          </div>
+                          {trainingForm.labEnabled && (
+                            <>
+                              <div className="space-y-2">
+                                <Label>Lab Workflow Name</Label>
+                                <Input
+                                  placeholder="Demo: Request to Fulfillment"
+                                  value={trainingForm.labWorkflowName}
+                                  onChange={(e) =>
+                                    setTrainingForm({
+                                      ...trainingForm,
+                                      labWorkflowName: e.target.value,
+                                    })
+                                  }
+                                />
+                              </div>
+                              <div className="space-y-2">
+                                <Label>Swimlanes (comma-separated)</Label>
+                                <Input
+                                  placeholder="Requester, Operations, Approver"
+                                  value={trainingForm.labSwimlanes}
+                                  onChange={(e) =>
+                                    setTrainingForm({
+                                      ...trainingForm,
+                                      labSwimlanes: e.target.value,
+                                    })
+                                  }
+                                />
+                              </div>
+                              <div className="space-y-2">
+                                <Label>Steps (one per line)</Label>
+                                <Textarea
+                                  placeholder="Submit Request&#10;Validate Request&#10;Approve/Reject&#10;..."
+                                  value={trainingForm.labSteps}
+                                  onChange={(e) =>
+                                    setTrainingForm({
+                                      ...trainingForm,
+                                      labSteps: e.target.value,
+                                    })
+                                  }
+                                  rows={4}
+                                />
+                              </div>
+                            </>
+                          )}
+                        </>
+                      )}
                     </div>
                     <DialogFooter>
                       <Button

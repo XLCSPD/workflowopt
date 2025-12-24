@@ -192,9 +192,16 @@ export default function TrainingPage() {
                 </TabsTrigger>
               </TabsList>
 
-              <TabsContent value={activeTab} className="mt-6">
-                <div className="grid gap-4 md:grid-cols-2">
-                  {filteredModules.map((module) => {
+              <TabsContent value={activeTab} className="mt-6 space-y-8">
+                {(() => {
+                  const appOverviewModules = filteredModules.filter((m) =>
+                    m.title.toLowerCase().includes("app overview")
+                  );
+                  const coreModules = filteredModules.filter(
+                    (m) => !m.title.toLowerCase().includes("app overview")
+                  );
+
+                  const renderModuleCard = (module: TrainingContentWithProgress, isAppOverview: boolean) => {
                     const Icon = getTypeIcon(module.type);
                     const isDisabled = module.status === "locked";
 
@@ -202,9 +209,15 @@ export default function TrainingPage() {
                       <Card
                         key={module.id}
                         className={`transition-all duration-200 ${
+                          isAppOverview 
+                            ? "border-brand-gold/30 bg-brand-gold/5" 
+                            : ""
+                        } ${
                           isDisabled
                             ? "opacity-60"
-                            : "hover:shadow-md cursor-pointer"
+                            : isAppOverview 
+                              ? "hover:shadow-md hover:border-brand-gold cursor-pointer"
+                              : "hover:shadow-md cursor-pointer"
                         }`}
                       >
                         <CardHeader className="pb-3">
@@ -215,6 +228,8 @@ export default function TrainingPage() {
                                   module.status === "completed"
                                     ? "bg-brand-emerald/10"
                                     : module.status === "in_progress"
+                                    ? "bg-brand-gold/20"
+                                    : isAppOverview
                                     ? "bg-brand-gold/10"
                                     : "bg-muted"
                                 }`}
@@ -223,7 +238,7 @@ export default function TrainingPage() {
                                   className={`h-5 w-5 ${
                                     module.status === "completed"
                                       ? "text-brand-emerald"
-                                      : module.status === "in_progress"
+                                      : module.status === "in_progress" || isAppOverview
                                       ? "text-brand-gold"
                                       : "text-muted-foreground"
                                   }`}
@@ -286,17 +301,62 @@ export default function TrainingPage() {
                         </CardContent>
                       </Card>
                     );
-                  })}
-                </div>
+                  };
 
-                {filteredModules.length === 0 && (
-                  <div className="text-center py-12">
-                    <BookOpen className="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />
-                    <p className="text-muted-foreground">
-                      No training modules found for this category.
-                    </p>
-                  </div>
-                )}
+                  return (
+                    <>
+                      {/* Getting Started Section - App Overview Modules */}
+                      {appOverviewModules.length > 0 && (
+                        <div className="space-y-4">
+                          <div className="flex items-center gap-3">
+                            <div className="h-8 w-1 bg-brand-gold rounded-full" />
+                            <div>
+                              <h3 className="text-lg font-semibold text-brand-navy">
+                                Getting Started
+                              </h3>
+                              <p className="text-sm text-muted-foreground">
+                                Start here to learn the basics of ProcessOpt
+                              </p>
+                            </div>
+                          </div>
+                          <div className="grid gap-4 md:grid-cols-2">
+                            {appOverviewModules.map((module) => renderModuleCard(module, true))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Divider between sections */}
+                      {appOverviewModules.length > 0 && coreModules.length > 0 && (
+                        <div className="relative">
+                          <div className="absolute inset-0 flex items-center">
+                            <span className="w-full border-t" />
+                          </div>
+                          <div className="relative flex justify-center text-xs uppercase">
+                            <span className="bg-background px-3 text-muted-foreground">
+                              Core Training Modules
+                            </span>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Core Training Modules */}
+                      {coreModules.length > 0 && (
+                        <div className="grid gap-4 md:grid-cols-2">
+                          {coreModules.map((module) => renderModuleCard(module, false))}
+                        </div>
+                      )}
+
+                      {filteredModules.length === 0 && (
+                        <div className="text-center py-12">
+                          <BookOpen className="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />
+                          <p className="text-muted-foreground">
+                            No training modules found for this category.
+                          </p>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
               </TabsContent>
             </Tabs>
           </>
