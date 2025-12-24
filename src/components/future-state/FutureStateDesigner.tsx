@@ -92,8 +92,8 @@ export function FutureStateDesigner({
   realtimeStudio: _realtimeStudio,
 }: FutureStateDesignerProps) {
   console.log("[FutureStateDesigner] Rendering");
-  // Router available for future navigation needs
-  const _router = useRouter();
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const router = useRouter();
   const [futureStates, setFutureStates] = useState<FutureState[]>([]);
   const [selectedFutureState, setSelectedFutureState] = useState<FutureStateWithGraph | null>(null);
   const [currentSteps, setCurrentSteps] = useState<ProcessStep[]>([]);
@@ -105,7 +105,8 @@ export function FutureStateDesigner({
   const [viewMode, setViewMode] = useState<"side-by-side" | "future-only" | "flowchart">("flowchart");
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [stepDesignPanelOpen, setStepDesignPanelOpen] = useState(false);
-  const [highlightedStepId, _setHighlightedStepId] = useState<string | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [highlightedStepId, setHighlightedStepId] = useState<string | null>(null);
   const [isMobile, setIsMobile] = useState(false);
 
   // Edit mode and toolbox state
@@ -414,7 +415,8 @@ export function FutureStateDesigner({
   }, [nodesByLane, currentByLane]);
 
   // Get impacted step IDs (source steps for modified/new nodes) - used for future features
-  const _impactedStepIds = useMemo(() => {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const impactedStepIds = useMemo(() => {
     if (!selectedFutureState) return [];
     return selectedFutureState.nodes
       .filter((n) => n.action !== "keep" && n.source_step_id)
