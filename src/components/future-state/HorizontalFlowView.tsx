@@ -534,8 +534,9 @@ function HorizontalFlowViewInner({
           id: node.id,
           type: "flowStep",
           position: { 
-            x: 20 + indexInLane * (NODE_WIDTH + NODE_GAP_X), // Start near left
-            y: laneY,
+            // Use stored position if available, otherwise calculate default
+            x: node.position_x > 0 ? node.position_x : 20 + indexInLane * (NODE_WIDTH + NODE_GAP_X),
+            y: laneY, // Y is always lane-based for swimlane alignment
           },
           data: {
             label: node.name,
