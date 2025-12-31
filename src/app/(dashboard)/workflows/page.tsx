@@ -57,7 +57,6 @@ import { WorkflowImportDialog } from "@/components/workflow/WorkflowImportDialog
 import { CopyWorkflowDialog } from "@/components/workflow/CopyWorkflowDialog";
 import type { Process } from "@/types";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { useAuthStore } from "@/lib/stores/authStore";
 
 interface WorkflowWithStats extends Process {
   stepCount: number;
@@ -88,7 +87,6 @@ function compareValues(a: unknown, b: unknown): number {
 
 export default function WorkflowsPage() {
   const { toast } = useToast();
-  const { user } = useAuthStore();
   const [workflows, setWorkflows] = useState<WorkflowWithStats[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
