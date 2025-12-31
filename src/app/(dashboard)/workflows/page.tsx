@@ -45,6 +45,7 @@ import {
   LayoutGrid,
   List,
   ArrowUpDown,
+  Copy,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -53,8 +54,10 @@ import {
   deleteProcess,
 } from "@/lib/services/workflows";
 import { WorkflowImportDialog } from "@/components/workflow/WorkflowImportDialog";
+import { CopyWorkflowDialog } from "@/components/workflow/CopyWorkflowDialog";
 import type { Process } from "@/types";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useAuthStore } from "@/lib/stores/authStore";
 
 interface WorkflowWithStats extends Process {
   stepCount: number;
@@ -85,6 +88,7 @@ function compareValues(a: unknown, b: unknown): number {
 
 export default function WorkflowsPage() {
   const { toast } = useToast();
+  const { user } = useAuthStore();
   const [workflows, setWorkflows] = useState<WorkflowWithStats[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
@@ -93,6 +97,10 @@ export default function WorkflowsPage() {
   const [isCreating, setIsCreating] = useState(false);
   const [newWorkflow, setNewWorkflow] = useState({ name: "", description: "" });
 
+  // Copy workflow dialog state (AC-1.1)
+  const [isCopyDialogOpen, setIsCopyDialogOpen] = useState(false);
+  const [workflowToCopy, setWorkflowToCopy] = useState<WorkflowWithStats | null>(null);
+
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [sortKey, setSortKey] = useState<SortKey>("updated_at");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
@@ -100,6 +108,13 @@ export default function WorkflowsPage() {
   const [laneFilter, setLaneFilter] = useState<"all" | "1" | "2" | "3" | "4+">("all");
   const [stepsFilter, setStepsFilter] = useState<"all" | "0-5" | "6-10" | "11-20" | "21+">("all");
   const [sessionsFilter, setSessionsFilter] = useState<"all" | "0" | "1+">("all");
+
+  // Handler to open copy dialog (AC-1.1)
+  const handleOpenCopyDialog = useCallback((workflow: WorkflowWithStats) => {
+    setWorkflowToCopy(workflow);
+    setIsCopyDialogOpen(true);
+  }, []);
+
 
   const loadWorkflows = useCallback(async () => {
     try {
@@ -338,6 +353,22 @@ export default function WorkflowsPage() {
         onSuccess={handleImportSuccess}
       />
 
+      {/* Copy Workflow Dialog (AC-1.1) */}
+      {workflowToCopy && (
+        <CopyWorkflowDialog
+          open={isCopyDialogOpen}
+          onOpenChange={(open) => {
+            setIsCopyDialogOpen(open);
+            if (!open) setWorkflowToCopy(null);
+          }}
+          workflow={workflowToCopy}
+          onSuccess={() => {
+            // Refresh the list after copy
+            loadWorkflows();
+          }}
+        />
+      )}
+
       <div className="flex-1 p-6 space-y-6 overflow-auto">
         {/* Search + View/Filters */}
         <div className="flex flex-col gap-3">
@@ -482,6 +513,10 @@ export default function WorkflowsPage() {
                               <Edit className="mr-2 h-4 w-4" />
                               Edit
                             </Link>
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleOpenCopyDialog(workflow)}>
+                            <Copy className="mr-2 h-4 w-4" />
+                            Copy workflow
                           </DropdownMenuItem>
                           <DropdownMenuItem
                             className="text-destructive"
@@ -642,6 +677,10 @@ export default function WorkflowsPage() {
                                     <Edit className="mr-2 h-4 w-4" />
                                     Edit
                                   </Link>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => handleOpenCopyDialog(workflow)}>
+                                  <Copy className="mr-2 h-4 w-4" />
+                                  Copy workflow
                                 </DropdownMenuItem>
                                 <DropdownMenuItem
                                   className="text-destructive"

@@ -49,6 +49,7 @@ import {
   Save,
   Trash2,
   Undo2,
+  Copy,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useUndoRedo } from "@/hooks/useUndoRedo";
@@ -70,6 +71,7 @@ import {
   reorderLanes,
   updateLaneColor,
   deleteProcess,
+  updateStepPositions,
 } from "@/lib/services/workflowEditor";
 import type { Process, ProcessLane, ProcessStep, StepType } from "@/types";
 import type { StepConnection } from "@/lib/services/workflows";
@@ -79,6 +81,10 @@ import {
   WorkflowContextDrawer,
   ContextTriggerButton,
 } from "@/components/workflow/WorkflowContextDrawer";
+import { CopyWorkflowDialog } from "@/components/workflow/CopyWorkflowDialog";
+import { useAuthStore } from "@/lib/stores/authStore";
+import { canEditWorkflow, getSourceWorkflowName, getSourceFutureStateName } from "@/lib/services/workflowCopy";
+import { useSearchParams } from "next/navigation";
 
 interface ConnectionData {
   id?: string;
@@ -94,8 +100,13 @@ interface WorkflowSnapshot {
 export default function WorkflowDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { toast } = useToast();
+  const { user } = useAuthStore();
   const reactFlowInstanceRef = useRef<ReactFlowInstance | null>(null);
+
+  // Copy workflow dialog state (AC-1.2)
+  const [isCopyDialogOpen, setIsCopyDialogOpen] = useState(false);
 
   const [isLoading, setIsLoading] = useState(true);
   const [workflow, setWorkflow] = useState<Process | null>(null);
@@ -117,6 +128,7 @@ export default function WorkflowDetailPage() {
   }, [connections]);
 
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
+  const [selectedStepIds, setSelectedStepIds] = useState<string[]>([]);
   const [showHeatmap, setShowHeatmap] = useState(false);
   const [isPanelOpen, setIsPanelOpen] = useState(false);
 
@@ -141,6 +153,41 @@ export default function WorkflowDetailPage() {
   const [isContextDrawerOpen, setIsContextDrawerOpen] = useState(false);
   const [contextCompleteness, setContextCompleteness] = useState(0);
   const laneNames = useMemo(() => lanes.map((l) => l.name), [lanes]);
+
+  // Lineage display state (AC-4.2)
+  const [sourceWorkflowName, setSourceWorkflowName] = useState<string | null>(null);
+
+  // Check if user can copy this workflow (AC-1.3)
+  const canCopy = useMemo(() => {
+    if (!user || !workflow) return false;
+    return canEditWorkflow({ created_by: workflow.created_by }, { id: user.id, role: user.role });
+  }, [user, workflow]);
+
+  // Handle mode=edit URL parameter (AC-5.1)
+  useEffect(() => {
+    if (searchParams.get("mode") === "edit" && !isEditMode && !isLoading) {
+      setIsEditMode(true);
+    }
+  }, [searchParams, isLoading, isEditMode]);
+
+  // Fetch source workflow name for lineage display (AC-4.2)
+  useEffect(() => {
+    if (!workflow) return;
+    
+    const fetchSourceName = async () => {
+      if (workflow.copied_from_future_state_id) {
+        const name = await getSourceFutureStateName(workflow.copied_from_future_state_id);
+        setSourceWorkflowName(name);
+      } else if (workflow.copied_from_process_id) {
+        const name = await getSourceWorkflowName(workflow.copied_from_process_id);
+        setSourceWorkflowName(name);
+      } else {
+        setSourceWorkflowName(null);
+      }
+    };
+
+    fetchSourceName();
+  }, [workflow]);
 
   const laneStyles = useMemo(() => {
     const map: Record<string, { bg: string; border: string }> = {};
@@ -318,6 +365,20 @@ export default function WorkflowDetailPage() {
 
   const handleSelectStep = useCallback((stepId: string | null) => {
     setSelectedStepId(stepId);
+    // When single-selecting, also update multi-select state
+    if (stepId) {
+      setSelectedStepIds([stepId]);
+    }
+  }, []);
+
+  const handleSelectSteps = useCallback((stepIds: string[]) => {
+    setSelectedStepIds(stepIds);
+    // When multi-selecting, clear single select if more than one
+    if (stepIds.length !== 1) {
+      setSelectedStepId(null);
+    } else if (stepIds.length === 1) {
+      setSelectedStepId(stepIds[0]);
+    }
   }, []);
 
   const handleCreateStepFromToolbox = useCallback(
@@ -352,6 +413,28 @@ export default function WorkflowDetailPage() {
       }
     },
     [workflow, isSaving, pushSnapshot, cloneSnapshot, currentSnapshot, steps.length, toast]
+  );
+
+  // Handle position changes from ProcessMap - persist to database
+  const handlePositionsChange = useCallback(
+    async (positions: { id: string; x: number; y: number }[]) => {
+      if (!workflow) return;
+      if (positions.length === 0) return;
+      
+      try {
+        await updateStepPositions(
+          positions.map((p) => ({
+            id: p.id,
+            position_x: p.x,
+            position_y: p.y,
+          }))
+        );
+      } catch (error) {
+        console.error("Failed to save step positions:", error);
+        // Don't show toast for this - it's a background save
+      }
+    },
+    [workflow]
   );
 
   const handleReorderLanes = useCallback(
@@ -881,6 +964,7 @@ export default function WorkflowDetailPage() {
         connections.filter((c) => c.source !== stepId && c.target !== stepId)
       );
       if (selectedStepId === stepId) setSelectedStepId(null);
+      setSelectedStepIds((prev) => prev.filter((id) => id !== stepId));
       setIsEditStepDialogOpen(false);
       setEditingStep(null);
 
@@ -894,6 +978,46 @@ export default function WorkflowDetailPage() {
         variant: "destructive",
         title: "Error",
         description: "Failed to delete step.",
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Handle bulk delete of multiple steps
+  const handleDeleteSteps = async (stepIds: string[]) => {
+    if (stepIds.length === 0) return;
+    
+    pushSnapshot(cloneSnapshot(currentSnapshot));
+    setInlineEditingStepId(null);
+    setIsSaving(true);
+    
+    try {
+      // Delete all steps in parallel
+      await Promise.all(stepIds.map((id) => deleteStep(id)));
+      
+      // Update local state
+      setSteps((prev) => prev.filter((s) => !stepIds.includes(s.id)));
+      setConnections((prev) =>
+        prev.filter((c) => !stepIds.includes(c.source) && !stepIds.includes(c.target))
+      );
+      
+      // Clear selection
+      setSelectedStepId(null);
+      setSelectedStepIds([]);
+      setIsEditStepDialogOpen(false);
+      setEditingStep(null);
+
+      toast({
+        title: `${stepIds.length} steps deleted`,
+        description: "Steps have been removed from the workflow.",
+      });
+    } catch (error) {
+      console.error("Failed to delete steps:", error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to delete some steps.",
       });
     } finally {
       setIsSaving(false);
@@ -1246,6 +1370,18 @@ export default function WorkflowDetailPage() {
                   <Edit className="mr-2 h-4 w-4" />
                   Edit
                 </Button>
+                {/* Copy as new workflow (AC-1.2) */}
+                {canCopy && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setIsCopyDialogOpen(true)}
+                    className="bg-white"
+                  >
+                    <Copy className="mr-2 h-4 w-4" />
+                    Copy as New
+                  </Button>
+                )}
                 <Button
                   variant="outline"
                   size="sm"
@@ -1278,6 +1414,12 @@ export default function WorkflowDetailPage() {
                   <Edit className="mr-2 h-4 w-4" />
                   Edit Workflow
                 </DropdownMenuItem>
+                {canCopy && (
+                  <DropdownMenuItem onClick={() => setIsCopyDialogOpen(true)}>
+                    <Copy className="mr-2 h-4 w-4" />
+                    Copy workflow
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuItem>
                   <Share2 className="mr-2 h-4 w-4" />
                   Share
@@ -1317,11 +1459,18 @@ export default function WorkflowDetailPage() {
       />
 
       {/* Stats Bar */}
-      <div className="px-6 py-3 border-b bg-muted/30 flex items-center gap-4">
+      <div className="px-6 py-3 border-b bg-muted/30 flex items-center gap-4 flex-wrap">
         {isEditMode && (
           <Badge className="bg-orange-100 text-orange-700 border-orange-300">
             <Edit className="mr-1 h-3 w-3" />
             Edit Mode
+          </Badge>
+        )}
+        {/* Lineage indicator (AC-4.2) */}
+        {sourceWorkflowName && (
+          <Badge variant="outline" className="bg-blue-50 border-blue-300 text-blue-700">
+            <Copy className="mr-1 h-3 w-3" />
+            Copied from: {sourceWorkflowName}
           </Badge>
         )}
         <Badge variant="secondary">{steps.length} Steps</Badge>
@@ -1348,9 +1497,16 @@ export default function WorkflowDetailPage() {
           </>
         )}
         {isEditMode && (
-          <p className="text-sm text-muted-foreground ml-auto">
-            Double-click canvas to add. Select a step, press E to edit. Double-click the name to rename.
-          </p>
+          <>
+            {selectedStepIds.length > 1 && (
+              <Badge variant="secondary" className="ml-2 bg-blue-100 text-blue-700">
+                {selectedStepIds.length} steps selected
+              </Badge>
+            )}
+            <p className="text-sm text-muted-foreground ml-auto">
+              Double-click canvas to add. Shift+click or drag to multi-select. Press Del to delete.
+            </p>
+          </>
         )}
       </div>
 
@@ -1370,7 +1526,9 @@ export default function WorkflowDetailPage() {
             connections={connections}
             observations={observations}
             selectedStepId={selectedStepId}
+            selectedStepIds={selectedStepIds}
             onSelectStep={handleSelectStep}
+            onSelectSteps={handleSelectSteps}
             onStepClick={handleStepClick}
             onQuickAddStep={handleQuickAddStep}
             onCreateStepFromToolbox={handleCreateStepFromToolbox}
@@ -1382,11 +1540,13 @@ export default function WorkflowDetailPage() {
             onToggleHeatmap={setShowHeatmap}
             isEditMode={isEditMode}
             onDeleteStep={(stepId) => void handleDeleteStep(stepId)}
+            onDeleteSteps={(stepIds) => void handleDeleteSteps(stepIds)}
             onConnect={handleConnect}
             onDeleteConnection={handleDeleteConnection}
             onReactFlowInit={(instance) => {
               reactFlowInstanceRef.current = instance;
             }}
+            onPositionsChange={handlePositionsChange}
           />
 
           {steps.length === 0 && (
@@ -1862,6 +2022,15 @@ export default function WorkflowDetailPage() {
         processId={params.id as string}
         workflowName={workflow?.name || "Workflow"}
       />
+
+      {/* Copy Workflow Dialog (AC-1.2) */}
+      {workflow && (
+        <CopyWorkflowDialog
+          open={isCopyDialogOpen}
+          onOpenChange={setIsCopyDialogOpen}
+          workflow={workflow}
+        />
+      )}
     </div>
   );
 }

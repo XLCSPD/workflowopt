@@ -17,6 +17,7 @@ import ReactFlow, {
   ConnectionLineType,
   Panel,
   MarkerType,
+  SelectionMode,
 } from "reactflow";
 import "reactflow/dist/style.css";
 import Dagre from "@dagrejs/dagre";
@@ -41,8 +42,10 @@ interface ProcessMapProps {
   connections: { source: string; target: string }[];
   observations?: Record<string, { count: number; priorityScore: number }>;
   selectedStepId?: string | null;
+  selectedStepIds?: string[];
   onStepClick?: (stepId: string) => void;
   onSelectStep?: (stepId: string | null) => void;
+  onSelectSteps?: (stepIds: string[]) => void;
   onQuickAddStep?: (lane: string, position: { x: number; y: number }) => void;
   onCreateStepFromToolbox?: (input: {
     type: ProcessStep["step_type"];
@@ -57,9 +60,11 @@ interface ProcessMapProps {
   onToggleHeatmap?: (show: boolean) => void;
   isEditMode?: boolean;
   onDeleteStep?: (stepId: string) => void;
+  onDeleteSteps?: (stepIds: string[]) => void;
   onConnect?: (sourceId: string, targetId: string) => void;
   onDeleteConnection?: (sourceId: string, targetId: string) => void;
   onReactFlowInit?: (instance: ReactFlowInstance) => void;
+  onPositionsChange?: (positions: { id: string; x: number; y: number }[]) => void;
 }
 
 // Helper to get localStorage key for a workflow
@@ -160,8 +165,10 @@ function ProcessMapInner({
   connections,
   observations = {},
   selectedStepId,
+  selectedStepIds = [],
   onStepClick,
   onSelectStep,
+  onSelectSteps,
   onQuickAddStep,
   onCreateStepFromToolbox,
   inlineEditingStepId,
@@ -172,11 +179,13 @@ function ProcessMapInner({
   onToggleHeatmap,
   isEditMode = false,
   onDeleteStep,
+  onDeleteSteps,
   onConnect,
   onDeleteConnection,
   onReactFlowInit,
+  onPositionsChange,
 }: ProcessMapProps) {
-  const { fitView, zoomIn, zoomOut, screenToFlowPosition } = useReactFlow();
+  const { fitView, zoomIn, zoomOut, screenToFlowPosition, getNodes } = useReactFlow();
   const viewport = useViewport();
   const canvasRef = useRef<HTMLDivElement | null>(null);
   
@@ -186,6 +195,12 @@ function ProcessMapInner({
 
   const onSelectStepRef = useRef(onSelectStep);
   onSelectStepRef.current = onSelectStep;
+
+  const onSelectStepsRef = useRef(onSelectSteps);
+  onSelectStepsRef.current = onSelectSteps;
+
+  const onDeleteStepsRef = useRef(onDeleteSteps);
+  onDeleteStepsRef.current = onDeleteSteps;
 
   const onQuickAddStepRef = useRef(onQuickAddStep);
   onQuickAddStepRef.current = onQuickAddStep;
@@ -208,24 +223,54 @@ function ProcessMapInner({
   // Track if layout has been saved
   const [hasLayoutSaved, setHasLayoutSaved] = useState(false);
 
-  // Load saved positions from localStorage
-  const savedPositions = useMemo(() => {
-    if (typeof window === 'undefined') return null;
+  // Track saved positions in state so it can update reactively
+  const [savedPositions, setSavedPositions] = useState<Record<string, { x: number; y: number }> | null>(null);
+
+  // Load saved positions from localStorage on mount and when workflowId changes
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
     try {
       const saved = localStorage.getItem(getLayoutStorageKey(workflowId));
       if (saved) {
-        return JSON.parse(saved) as Record<string, { x: number; y: number }>;
+        setSavedPositions(JSON.parse(saved) as Record<string, { x: number; y: number }>);
+        setHasLayoutSaved(true);
+      } else {
+        setSavedPositions(null);
+        setHasLayoutSaved(false);
       }
     } catch (e) {
       console.error('Failed to load saved layout:', e);
+      setSavedPositions(null);
+      setHasLayoutSaved(false);
     }
-    return null;
   }, [workflowId]);
 
-  // Check if we have a saved layout on mount
+  // Clean up localStorage when steps change (remove deleted steps' positions)
   useEffect(() => {
-    setHasLayoutSaved(savedPositions !== null);
-  }, [savedPositions]);
+    if (typeof window === 'undefined') return;
+    if (!savedPositions) return;
+    
+    const stepIds = new Set(steps.map(s => s.id));
+    const savedIds = Object.keys(savedPositions);
+    const hasDeletedSteps = savedIds.some(id => !stepIds.has(id));
+    
+    if (hasDeletedSteps) {
+      // Remove positions for steps that no longer exist
+      const cleanedPositions: Record<string, { x: number; y: number }> = {};
+      savedIds.forEach(id => {
+        if (stepIds.has(id)) {
+          cleanedPositions[id] = savedPositions[id];
+        }
+      });
+      
+      try {
+        localStorage.setItem(getLayoutStorageKey(workflowId), JSON.stringify(cleanedPositions));
+        setSavedPositions(cleanedPositions);
+      } catch (e) {
+        console.error('Failed to clean up layout:', e);
+      }
+    }
+  }, [steps, savedPositions, workflowId]);
 
   // Group steps by lane
   const swimlanes = useMemo(() => {
@@ -294,6 +339,11 @@ function ProcessMapInner({
 
       const key = e.key.toLowerCase();
 
+      // Get selected nodes directly from React Flow state (more reliable than props)
+      const allNodes = getNodes();
+      const selectedNodes = allNodes.filter((n) => n.selected);
+      const selectedNodeIds = selectedNodes.map((n) => n.id);
+
       if (key === "n") {
         if (!onQuickAddStepRef.current) return;
 
@@ -314,17 +364,36 @@ function ProcessMapInner({
           y: getSwimlaneYCenter(laneIndex),
         });
       } else if (key === "delete" || key === "backspace") {
-        if (!selectedStepId) return;
-        if (!onDeleteStepRef.current) return;
-
-        e.preventDefault();
-        if (confirm("Delete this step?")) onDeleteStepRef.current(selectedStepId);
+        // Handle multi-select deletion first (use React Flow's selection state)
+        if (selectedNodeIds.length > 1) {
+          if (!onDeleteStepsRef.current) return;
+          e.preventDefault();
+          const count = selectedNodeIds.length;
+          if (confirm(`Delete ${count} selected steps?`)) {
+            onDeleteStepsRef.current(selectedNodeIds);
+          }
+        } else if (selectedNodeIds.length === 1) {
+          if (!onDeleteStepRef.current) return;
+          e.preventDefault();
+          if (confirm("Delete this step?")) onDeleteStepRef.current(selectedNodeIds[0]);
+        } else if (selectedStepId) {
+          // Fallback to single selection from props
+          if (!onDeleteStepRef.current) return;
+          e.preventDefault();
+          if (confirm("Delete this step?")) onDeleteStepRef.current(selectedStepId);
+        }
       } else if (key === "e") {
-        if (!selectedStepId) return;
-        e.preventDefault();
-        onStepClickRef.current?.(selectedStepId);
+        // Only allow edit for single selection
+        if (selectedNodeIds.length === 1) {
+          e.preventDefault();
+          onStepClickRef.current?.(selectedNodeIds[0]);
+        } else if (!selectedNodeIds.length && selectedStepId) {
+          e.preventDefault();
+          onStepClickRef.current?.(selectedStepId);
+        }
       } else if (key === "escape") {
         onSelectStepRef.current?.(null);
+        onSelectStepsRef.current?.([]);
         if (selectedStepId) onCancelInlineEditStepRef.current?.(selectedStepId);
       }
     };
@@ -334,28 +403,50 @@ function ProcessMapInner({
   }, [
     isEditMode,
     selectedStepId,
+    selectedStepIds,
     steps,
     swimlanes,
     getLaneIndex,
     screenToFlowPosition,
+    getNodes,
   ]);
 
-  // Generate initial node positions - now checks for saved positions first
+  // Generate initial node positions - prioritizes: 1. localStorage, 2. DB position, 3. calculated
   const initialNodes: Node[] = useMemo(() => {
     const nodes: Node[] = [];
+    const newPositionsToSave: Record<string, { x: number; y: number }> = {};
+    let hasNewPositions = false;
 
     swimlanes.forEach((lane, laneIndex) => {
       lane.steps.forEach((step, stepIndex) => {
-        // Check for saved position first
+        // Check for saved position in localStorage first
         const savedPos = savedPositions?.[step.id];
+        
+        let position: { x: number; y: number };
+        
+        if (savedPos) {
+          // Use localStorage position
+          position = savedPos;
+        } else if (step.position_x !== undefined && step.position_y !== undefined) {
+          // Use database position (e.g., from toolbox drop)
+          position = { x: step.position_x, y: step.position_y };
+          // Mark this position to be saved to localStorage
+          newPositionsToSave[step.id] = position;
+          hasNewPositions = true;
+        } else {
+          // Calculate default position
+          position = {
+            x: 40 + stepIndex * (NODE_WIDTH + 40),
+            y: getSwimlaneYCenter(laneIndex),
+          };
+          newPositionsToSave[step.id] = position;
+          hasNewPositions = true;
+        }
         
         nodes.push({
           id: step.id,
           type: "stepNode",
-          position: savedPos || {
-            x: step.position_x || (40 + stepIndex * (NODE_WIDTH + 40)),
-            y: step.position_y || getSwimlaneYCenter(laneIndex),
-          },
+          position,
           data: {
             step,
             isSelected: false,
@@ -373,12 +464,23 @@ function ProcessMapInner({
       });
     });
 
+    // Save new positions to localStorage (side effect in memo - handled via callback)
+    if (hasNewPositions && typeof window !== 'undefined') {
+      const merged = { ...(savedPositions || {}), ...newPositionsToSave };
+      try {
+        localStorage.setItem(getLayoutStorageKey(workflowId), JSON.stringify(merged));
+      } catch (e) {
+        console.error('Failed to save new positions:', e);
+      }
+    }
+
     return nodes;
   }, [
     swimlanes,
     handleNodeClick,
     savedPositions,
     inlineEditingStepId,
+    workflowId,
   ]);
 
   // Generate edges
@@ -409,7 +511,8 @@ function ProcessMapInner({
     setEdges(initialEdges);
   }, [initialEdges, setEdges]);
 
-  // Update node data (selection, heatmap, observations) without changing positions
+  // Update node data (heatmap, observations) without changing positions or selection
+  // Selection is managed by React Flow internally when using multi-select features
   useEffect(() => {
     setNodes((currentNodes) =>
       currentNodes.map((node) => {
@@ -423,11 +526,15 @@ function ProcessMapInner({
           else heatmapIntensity = "low";
         }
 
+        // Check if node is selected based on our state (for custom styling in node component)
+        const isSelected = selectedStepId === node.id || selectedStepIds.includes(node.id) || node.selected;
+
         return {
           ...node,
+          // Don't override React Flow's selection - let it manage multi-select internally
           data: {
             ...node.data,
-            isSelected: selectedStepId === node.id,
+            isSelected,
             observationCount: obs.count,
             priorityScore: obs.priorityScore,
             heatmapIntensity,
@@ -436,18 +543,54 @@ function ProcessMapInner({
         };
       })
     );
-  }, [selectedStepId, observations, showHeatmap, inlineEditingStepId, setNodes]);
+  }, [selectedStepId, selectedStepIds, observations, showHeatmap, inlineEditingStepId, setNodes]);
 
-  // Save layout to localStorage
+  // Handle selection changes from React Flow (for multi-select via shift+click or drag selection)
+  const handleSelectionChange = useCallback(({ nodes: selectedNodes }: { nodes: Node[] }) => {
+    if (!isEditMode) return;
+    
+    const ids = selectedNodes.map((n) => n.id);
+    
+    if (ids.length === 0) {
+      onSelectStepRef.current?.(null);
+      onSelectStepsRef.current?.([]);
+    } else if (ids.length === 1) {
+      onSelectStepRef.current?.(ids[0]);
+      onSelectStepsRef.current?.(ids);
+    } else {
+      // Multiple selection
+      onSelectStepRef.current?.(null); // Clear single selection
+      onSelectStepsRef.current?.(ids);
+    }
+  }, [isEditMode]);
+
+  // Ref for onPositionsChange to avoid recreating saveLayout
+  const onPositionsChangeRef = useRef(onPositionsChange);
+  onPositionsChangeRef.current = onPositionsChange;
+
+  // Save layout to localStorage AND notify parent for database persistence
   const saveLayout = useCallback((nodesToSave: Node[]) => {
     if (typeof window === 'undefined') return;
     try {
       const positions: Record<string, { x: number; y: number }> = {};
+      const positionsArray: { id: string; x: number; y: number }[] = [];
+      
       nodesToSave.forEach((node) => {
         positions[node.id] = node.position;
+        positionsArray.push({
+          id: node.id,
+          x: node.position.x,
+          y: node.position.y,
+        });
       });
+      
       localStorage.setItem(getLayoutStorageKey(workflowId), JSON.stringify(positions));
       setHasLayoutSaved(true);
+      
+      // Also save to database via callback
+      if (onPositionsChangeRef.current) {
+        onPositionsChangeRef.current(positionsArray);
+      }
     } catch (e) {
       console.error('Failed to save layout:', e);
     }
@@ -631,6 +774,7 @@ function ProcessMapInner({
           onNodesChange={handleNodesChange}
           onEdgesChange={onEdgesChange}
           onInit={onReactFlowInit}
+          onSelectionChange={handleSelectionChange}
           nodeTypes={nodeTypes}
           connectionMode={ConnectionMode.Loose}
           connectOnClick={isEditMode}
@@ -649,6 +793,9 @@ function ProcessMapInner({
           nodesDraggable={isEditMode}
           nodesConnectable={isEditMode}
           elementsSelectable={isEditMode || !!onStepClick}
+          selectionOnDrag={isEditMode}
+          selectionMode={isEditMode ? SelectionMode.Partial : undefined}
+          multiSelectionKeyCode={isEditMode ? "Shift" : null}
           onPaneClick={(event) => {
             // ReactFlow doesn't have a dedicated onPaneDoubleClick; use click.detail (2 == double click).
             if (!isEditMode) return;
@@ -696,6 +843,7 @@ function ProcessMapInner({
                 <span className="keyboard-shortcuts-help">[Del] Remove</span>
                 <span className="keyboard-shortcuts-help">[E] Edit</span>
                 <span className="keyboard-shortcuts-help">[Esc] Deselect</span>
+                <span className="keyboard-shortcuts-help">[Shift+Click] Multi-select</span>
               </div>
             )}
             <Button

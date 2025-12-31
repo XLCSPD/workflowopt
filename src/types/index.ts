@@ -33,6 +33,9 @@ export interface User {
   updated_at: string;
 }
 
+// Copy source type for workflow lineage
+export type CopySourceType = "original" | "current" | "future_state";
+
 // Process/Workflow
 export interface Process {
   id: string;
@@ -42,6 +45,12 @@ export interface Process {
   created_by: string;
   created_at: string;
   updated_at: string;
+  // Lineage metadata (for copied workflows)
+  copied_from_process_id?: string | null;
+  copied_from_future_state_id?: string | null;
+  copy_source_type?: CopySourceType;
+  copied_by?: string | null;
+  copied_at?: string | null;
 }
 
 // Process Lane (Swimlane) - persisted per workflow
