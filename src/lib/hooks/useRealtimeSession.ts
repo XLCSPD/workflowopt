@@ -45,7 +45,8 @@ export function useRealtimeSession({
   onParticipantUpdate,
 }: UseRealtimeSessionOptions) {
   const [isConnected, setIsConnected] = useState(false);
-  const [channel, setChannel] = useState<RealtimeChannel | null>(null);
+  // Channel is stored for potential future use (cleanup, reconnection)
+  const [_channel, setChannel] = useState<RealtimeChannel | null>(null);
   const supabase = getSupabaseClient();
 
   // Use refs for callbacks to avoid re-subscribing when callbacks change

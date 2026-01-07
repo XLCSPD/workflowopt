@@ -88,7 +88,7 @@ function compareValues(a: unknown, b: unknown): number {
 
 export default function WorkflowsPage() {
   const { toast } = useToast();
-  const { user } = useAuthStore();
+  useAuthStore(); // Auth store for potential future use
   const [workflows, setWorkflows] = useState<WorkflowWithStats[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");

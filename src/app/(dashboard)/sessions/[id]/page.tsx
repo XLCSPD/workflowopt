@@ -137,14 +137,13 @@ export default function SessionDetailPage() {
     }
   }, [sessionId]);
 
-  // Setup realtime subscription - temporarily disabled to debug infinite loop
-  // const { isConnected } = useRealtimeSession({
-  //   sessionId,
-  //   onObservationInsert: handleObservationInsert,
-  //   onParticipantJoin: handleParticipantJoin,
-  //   onParticipantUpdate: handleParticipantUpdate,
-  // });
-  const isConnected = false;
+  // Setup realtime subscription
+  const { isConnected } = useRealtimeSession({
+    sessionId,
+    onObservationInsert: handleObservationInsert,
+    onParticipantJoin: handleParticipantJoin,
+    onParticipantUpdate: handleParticipantUpdate,
+  });
 
   // Load session data
   useEffect(() => {
