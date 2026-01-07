@@ -223,8 +223,12 @@ function ProcessMapInner({
   // Track if layout has been saved
   const [hasLayoutSaved, setHasLayoutSaved] = useState(false);
 
-  // Track saved positions in state so it can update reactively
-  const [savedPositions, setSavedPositions] = useState<Record<string, { x: number; y: number }> | null>(null);
+  // Track saved positions using a ref to avoid triggering re-renders and infinite loops
+  // The ref is used in initialNodes useMemo to read positions without being a dependency
+  const savedPositionsRef = useRef<Record<string, { x: number; y: number }> | null>(null);
+  
+  // Also keep state version for cleanup effect (but not used in initialNodes)
+  const [savedPositionsState, setSavedPositionsState] = useState<Record<string, { x: number; y: number }> | null>(null);
 
   // Load saved positions from localStorage on mount and when workflowId changes
   useEffect(() => {
@@ -232,15 +236,19 @@ function ProcessMapInner({
     try {
       const saved = localStorage.getItem(getLayoutStorageKey(workflowId));
       if (saved) {
-        setSavedPositions(JSON.parse(saved) as Record<string, { x: number; y: number }>);
+        const parsed = JSON.parse(saved) as Record<string, { x: number; y: number }>;
+        savedPositionsRef.current = parsed;
+        setSavedPositionsState(parsed);
         setHasLayoutSaved(true);
       } else {
-        setSavedPositions(null);
+        savedPositionsRef.current = null;
+        setSavedPositionsState(null);
         setHasLayoutSaved(false);
       }
     } catch (e) {
       console.error('Failed to load saved layout:', e);
-      setSavedPositions(null);
+      savedPositionsRef.current = null;
+      setSavedPositionsState(null);
       setHasLayoutSaved(false);
     }
   }, [workflowId]);
@@ -248,10 +256,10 @@ function ProcessMapInner({
   // Clean up localStorage when steps change (remove deleted steps' positions)
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    if (!savedPositions) return;
+    if (!savedPositionsState) return;
     
     const stepIds = new Set(steps.map(s => s.id));
-    const savedIds = Object.keys(savedPositions);
+    const savedIds = Object.keys(savedPositionsState);
     const hasDeletedSteps = savedIds.some(id => !stepIds.has(id));
     
     if (hasDeletedSteps) {
@@ -259,18 +267,19 @@ function ProcessMapInner({
       const cleanedPositions: Record<string, { x: number; y: number }> = {};
       savedIds.forEach(id => {
         if (stepIds.has(id)) {
-          cleanedPositions[id] = savedPositions[id];
+          cleanedPositions[id] = savedPositionsState[id];
         }
       });
       
       try {
         localStorage.setItem(getLayoutStorageKey(workflowId), JSON.stringify(cleanedPositions));
-        setSavedPositions(cleanedPositions);
+        savedPositionsRef.current = cleanedPositions;
+        setSavedPositionsState(cleanedPositions);
       } catch (e) {
         console.error('Failed to clean up layout:', e);
       }
     }
-  }, [steps, savedPositions, workflowId]);
+  }, [steps, savedPositionsState, workflowId]);
 
   // Group steps by lane
   const swimlanes = useMemo(() => {
@@ -412,10 +421,13 @@ function ProcessMapInner({
   ]);
 
   // Generate initial node positions - prioritizes: 1. localStorage, 2. DB position, 3. calculated
+  // Uses savedPositionsRef to avoid re-creating nodes when positions are loaded from localStorage
   const initialNodes: Node[] = useMemo(() => {
     const nodes: Node[] = [];
     const newPositionsToSave: Record<string, { x: number; y: number }> = {};
     let hasNewPositions = false;
+    // Read from ref to avoid dependency on savedPositions state
+    const savedPositions = savedPositionsRef.current;
 
     swimlanes.forEach((lane, laneIndex) => {
       lane.steps.forEach((step, stepIndex) => {
@@ -469,6 +481,7 @@ function ProcessMapInner({
       const merged = { ...(savedPositions || {}), ...newPositionsToSave };
       try {
         localStorage.setItem(getLayoutStorageKey(workflowId), JSON.stringify(merged));
+        savedPositionsRef.current = merged;
       } catch (e) {
         console.error('Failed to save new positions:', e);
       }
@@ -478,7 +491,6 @@ function ProcessMapInner({
   }, [
     swimlanes,
     handleNodeClick,
-    savedPositions,
     inlineEditingStepId,
     workflowId,
   ]);
@@ -502,18 +514,41 @@ function ProcessMapInner({
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
 
-  // Only reset positions when steps data changes (not on selection/heatmap changes)
-  useEffect(() => {
-    setNodes(initialNodes);
-  }, [initialNodes, setNodes]);
+  // Track step IDs to detect when structure actually changes (using ref to avoid re-renders)
+  const prevStepIdsRef = useRef<string>(steps.map(s => s.id).sort().join(","));
 
+  // Only reset nodes when the step structure actually changes (steps added/removed)
+  // NOT when just positions or other data changes - this prevents infinite loops
   useEffect(() => {
-    setEdges(initialEdges);
-  }, [initialEdges, setEdges]);
+    const currentStepIds = steps.map(s => s.id).sort().join(",");
+    if (prevStepIdsRef.current !== currentStepIds) {
+      prevStepIdsRef.current = currentStepIds;
+      setNodes(initialNodes);
+      setEdges(initialEdges);
+    }
+  }, [steps, initialNodes, initialEdges, setNodes, setEdges]);
 
   // Update node data (heatmap, observations) without changing positions or selection
   // Selection is managed by React Flow internally when using multi-select features
+  // Using ref to track previous values and avoid unnecessary updates
+  const prevObservationsRef = useRef(observations);
+  const prevSelectedStepIdRef = useRef(selectedStepId);
+  const prevShowHeatmapRef = useRef(showHeatmap);
+  
   useEffect(() => {
+    // Only update if relevant data actually changed
+    const obsChanged = prevObservationsRef.current !== observations;
+    const selectionChanged = prevSelectedStepIdRef.current !== selectedStepId;
+    const heatmapChanged = prevShowHeatmapRef.current !== showHeatmap;
+    
+    if (!obsChanged && !selectionChanged && !heatmapChanged) {
+      return;
+    }
+    
+    prevObservationsRef.current = observations;
+    prevSelectedStepIdRef.current = selectedStepId;
+    prevShowHeatmapRef.current = showHeatmap;
+    
     setNodes((currentNodes) =>
       currentNodes.map((node) => {
         const obs = observations[node.id] || { count: 0, priorityScore: 0 };
