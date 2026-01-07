@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { getSupabaseClient } from "@/lib/supabase/client";
 import type { RealtimeChannel, RealtimePostgresChangesPayload } from "@supabase/supabase-js";
 
@@ -48,7 +48,30 @@ export function useRealtimeSession({
   const [channel, setChannel] = useState<RealtimeChannel | null>(null);
   const supabase = getSupabaseClient();
 
-  // Subscribe to realtime changes
+  // Use refs for callbacks to avoid re-subscribing when callbacks change
+  const onObservationInsertRef = useRef(onObservationInsert);
+  onObservationInsertRef.current = onObservationInsert;
+
+  const onObservationUpdateRef = useRef(onObservationUpdate);
+  onObservationUpdateRef.current = onObservationUpdate;
+
+  const onObservationDeleteRef = useRef(onObservationDelete);
+  onObservationDeleteRef.current = onObservationDelete;
+
+  const onParticipantJoinRef = useRef(onParticipantJoin);
+  onParticipantJoinRef.current = onParticipantJoin;
+
+  const onParticipantLeaveRef = useRef(onParticipantLeave);
+  onParticipantLeaveRef.current = onParticipantLeave;
+
+  const onParticipantUpdateRef = useRef(onParticipantUpdate);
+  onParticipantUpdateRef.current = onParticipantUpdate;
+
+  // Ref for sessionId to use in presence update
+  const sessionIdRef = useRef(sessionId);
+  sessionIdRef.current = sessionId;
+
+  // Subscribe to realtime changes - only depends on sessionId, not callbacks
   useEffect(() => {
     if (!sessionId) return;
 
@@ -64,7 +87,7 @@ export function useRealtimeSession({
         },
         (payload: RealtimePostgresChangesPayload<RealtimeObservation>) => {
           if (payload.new && 'id' in payload.new) {
-            onObservationInsert?.(payload.new as RealtimeObservation);
+            onObservationInsertRef.current?.(payload.new as RealtimeObservation);
           }
         }
       )
@@ -78,7 +101,7 @@ export function useRealtimeSession({
         },
         (payload: RealtimePostgresChangesPayload<RealtimeObservation>) => {
           if (payload.new && 'id' in payload.new) {
-            onObservationUpdate?.(payload.new as RealtimeObservation);
+            onObservationUpdateRef.current?.(payload.new as RealtimeObservation);
           }
         }
       )
@@ -92,7 +115,7 @@ export function useRealtimeSession({
         },
         (payload: RealtimePostgresChangesPayload<RealtimeObservation>) => {
           if (payload.old && 'id' in payload.old && payload.old.id) {
-            onObservationDelete?.(payload.old.id);
+            onObservationDeleteRef.current?.(payload.old.id);
           }
         }
       )
@@ -106,7 +129,7 @@ export function useRealtimeSession({
         },
         (payload: RealtimePostgresChangesPayload<RealtimeParticipant>) => {
           if (payload.new && 'id' in payload.new) {
-            onParticipantJoin?.(payload.new as RealtimeParticipant);
+            onParticipantJoinRef.current?.(payload.new as RealtimeParticipant);
           }
         }
       )
@@ -120,7 +143,7 @@ export function useRealtimeSession({
         },
         (payload: RealtimePostgresChangesPayload<RealtimeParticipant>) => {
           if (payload.old && 'id' in payload.old && payload.old.id) {
-            onParticipantLeave?.(payload.old.id);
+            onParticipantLeaveRef.current?.(payload.old.id);
           }
         }
       )
@@ -134,7 +157,7 @@ export function useRealtimeSession({
         },
         (payload: RealtimePostgresChangesPayload<RealtimeParticipant>) => {
           if (payload.new && 'id' in payload.new) {
-            onParticipantUpdate?.(payload.new as RealtimeParticipant);
+            onParticipantUpdateRef.current?.(payload.new as RealtimeParticipant);
           }
         }
       )
@@ -147,37 +170,25 @@ export function useRealtimeSession({
     return () => {
       observationsChannel.unsubscribe();
     };
-  }, [
-    sessionId,
-    supabase,
-    onObservationInsert,
-    onObservationUpdate,
-    onObservationDelete,
-    onParticipantJoin,
-    onParticipantLeave,
-    onParticipantUpdate,
-  ]);
+  }, [sessionId, supabase]);
 
-  // Broadcast presence (to show who's online)
+  // Broadcast presence (to show who's online) - stable callback using refs
   const updatePresence = useCallback(async () => {
-    if (!channel) return;
-    
     try {
-      // Update last_active_at in the database
       const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
+      if (user && sessionIdRef.current) {
         await supabase
           .from("session_participants")
           .update({ last_active_at: new Date().toISOString() })
-          .eq("session_id", sessionId)
+          .eq("session_id", sessionIdRef.current)
           .eq("user_id", user.id);
       }
     } catch (error) {
       console.error("Failed to update presence:", error);
     }
-  }, [channel, sessionId, supabase]);
+  }, [supabase]);
 
-  // Update presence periodically
+  // Update presence periodically - only run once when connected
   useEffect(() => {
     if (!isConnected) return;
 
