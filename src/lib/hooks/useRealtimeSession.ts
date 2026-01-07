@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { getSupabaseClient } from "@/lib/supabase/client";
-import type { RealtimeChannel, RealtimePostgresChangesPayload } from "@supabase/supabase-js";
+import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
 
 interface RealtimeObservation {
   id: string;
@@ -45,8 +45,6 @@ export function useRealtimeSession({
   onParticipantUpdate,
 }: UseRealtimeSessionOptions) {
   const [isConnected, setIsConnected] = useState(false);
-  // Channel is stored for potential future use (cleanup, reconnection)
-  const [_channel, setChannel] = useState<RealtimeChannel | null>(null);
   const supabase = getSupabaseClient();
 
   // Use refs for callbacks to avoid re-subscribing when callbacks change
@@ -165,8 +163,6 @@ export function useRealtimeSession({
       .subscribe((status: string) => {
         setIsConnected(status === "SUBSCRIBED");
       });
-
-    setChannel(observationsChannel);
 
     return () => {
       observationsChannel.unsubscribe();
