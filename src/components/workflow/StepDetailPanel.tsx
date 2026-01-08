@@ -1,6 +1,6 @@
 "use client";
 
-import { Clock, User, Tag, Paperclip, AlertTriangle } from "lucide-react";
+import { Clock, User, Tag, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -12,7 +12,9 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import type { ProcessStep, ObservationWithWasteTypes } from "@/types";
+import type { ProcessStep, ObservationWithWasteTypes, InformationFlowWithRelations } from "@/types";
+import { StepIOPanel } from "./StepIOPanel";
+import { StepAttachmentsPanel } from "./StepAttachmentsPanel";
 
 interface StepDetailPanelProps {
   step: ProcessStep | null;
@@ -22,6 +24,9 @@ interface StepDetailPanelProps {
   onStartTagging: () => void;
   onEditObservation?: (observation: ObservationWithWasteTypes) => void;
   sessionActive?: boolean;
+  informationFlows?: InformationFlowWithRelations[];
+  showIOPanel?: boolean;
+  processId?: string;
 }
 
 export function StepDetailPanel({
@@ -32,6 +37,9 @@ export function StepDetailPanel({
   onStartTagging,
   onEditObservation,
   sessionActive = false,
+  informationFlows = [],
+  showIOPanel = false,
+  processId,
 }: StepDetailPanelProps) {
   if (!step) return null;
 
@@ -217,16 +225,26 @@ export function StepDetailPanel({
 
             <Separator />
 
+            {/* Inputs & Outputs (SIPOC) */}
+            {showIOPanel && step.id && (
+              <StepIOPanel
+                stepId={step.id}
+                stepName={step.step_name}
+                informationFlows={informationFlows}
+                defaultOpen={false}
+              />
+            )}
+
+            {showIOPanel && <Separator />}
+
             {/* Attachments */}
-            <div>
-              <h4 className="text-sm font-medium flex items-center gap-2 mb-3">
-                <Paperclip className="h-4 w-4" />
-                Attachments
-              </h4>
-              <div className="text-center py-4 text-muted-foreground border-2 border-dashed rounded-lg">
-                <p className="text-sm">No attachments</p>
-              </div>
-            </div>
+            {step.id && processId && (
+              <StepAttachmentsPanel
+                stepId={step.id}
+                processId={processId}
+                defaultOpen={false}
+              />
+            )}
           </div>
         </ScrollArea>
 

@@ -1140,3 +1140,59 @@ export interface UpsertWorkflowMetricInput {
   order_index?: number;
 }
 
+// Information Flow types
+export * from "./informationFlow";
+
+// ============================================
+// STEP ATTACHMENTS TYPES
+// ============================================
+
+export type AttachmentCategory =
+  | "documentation"
+  | "screenshot"
+  | "diagram"
+  | "template"
+  | "reference"
+  | "other";
+
+export interface StepAttachment {
+  id: string;
+  step_id?: string;
+  node_id?: string;
+  filename: string;
+  original_filename: string;
+  file_path: string;
+  file_size: number;
+  mime_type?: string;
+  description?: string;
+  category: AttachmentCategory;
+  uploaded_by?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface StepAttachmentWithUser extends StepAttachment {
+  user?: {
+    id: string;
+    name: string;
+    email: string;
+  };
+}
+
+export interface CreateStepAttachmentInput {
+  step_id?: string;
+  node_id?: string;
+  filename: string;
+  original_filename: string;
+  file_path: string;
+  file_size: number;
+  mime_type?: string;
+  description?: string;
+  category?: AttachmentCategory;
+}
+
+export interface UpdateStepAttachmentInput {
+  description?: string;
+  category?: AttachmentCategory;
+}
+

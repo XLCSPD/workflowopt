@@ -30,10 +30,13 @@ import {
   Wifi,
   WifiOff,
   Activity,
+  PanelRightClose,
+  PanelRightOpen,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { formatDistanceToNow } from "date-fns";
-import { getSessionWithDetails, endSession, joinSession } from "@/lib/services/sessions";
+import { getSessionWithDetails, endSession, joinSession, updateSession } from "@/lib/services/sessions";
 import { getWorkflowWithDetails } from "@/lib/services/workflows";
 import { getWasteTypes } from "@/lib/services/wasteTypes";
 import {
@@ -44,8 +47,20 @@ import {
   getStepObservationStats,
   getObservationById,
 } from "@/lib/services/observations";
+import {
+  getFlowsByProcess,
+  createFlow,
+  updateFlow,
+  deleteFlow,
+} from "@/lib/services/informationFlows";
 import { useRealtimeSession } from "@/lib/hooks/useRealtimeSession";
+import { FlowDetailPanel } from "@/components/workflow/FlowDetailPanel";
 import type { ProcessStep, WasteType, Session } from "@/types";
+import type {
+  InformationFlowWithRelations,
+  CreateInformationFlowInput,
+  UpdateInformationFlowInput,
+} from "@/types/informationFlow";
 import type { StepConnection } from "@/lib/services/workflows";
 import type { ObservationWithDetails, CreateObservationInput } from "@/lib/services/observations";
 
@@ -94,6 +109,18 @@ export default function SessionDetailPage() {
   const [isUpdatingObservation, setIsUpdatingObservation] = useState(false);
   const [isDeletingObservation, setIsDeletingObservation] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | undefined>();
+  const [isSidePanelCollapsed, setIsSidePanelCollapsed] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("sessions-sidepanel-collapsed") === "true";
+    }
+    return false;
+  });
+
+  // Information flow state
+  const [informationFlows, setInformationFlows] = useState<InformationFlowWithRelations[]>([]);
+  const [flowPanelMode, setFlowPanelMode] = useState<"create" | "edit" | null>(null);
+  const [selectedFlowForEdit, setSelectedFlowForEdit] = useState<InformationFlowWithRelations | null>(null);
+  const [newFlowEdge, setNewFlowEdge] = useState<{ sourceStepId: string; targetStepId: string } | null>(null);
 
   const selectedStep = steps.find((s) => s.id === selectedStepId) || null;
 
@@ -136,6 +163,23 @@ export default function SessionDetailPage() {
       console.error("Failed to refresh participants:", error);
     }
   }, [sessionId]);
+
+  // Handle rename session
+  const handleRenameSession = useCallback(async (newName: string) => {
+    if (!session) return;
+    const trimmedName = newName.trim();
+    if (!trimmedName || trimmedName === session.name) return;
+
+    try {
+      await updateSession(session.id, { name: trimmedName });
+      setSession((prev) => prev ? { ...prev, name: trimmedName } : null);
+      toast({ title: "Session renamed successfully" });
+    } catch (error) {
+      console.error("Failed to rename session:", error);
+      toast({ variant: "destructive", title: "Error", description: "Failed to rename session." });
+      throw error; // Re-throw so EditableTitle stays in edit mode
+    }
+  }, [session, toast]);
 
   // Setup realtime subscription
   const { isConnected } = useRealtimeSession({
@@ -191,6 +235,16 @@ export default function SessionDetailPage() {
         // Get step observation stats
         const stats = await getStepObservationStats(sessionId);
         setStepObsStats(stats);
+
+        // Get information flows for this process
+        if (sessionData.process_id) {
+          try {
+            const flowsData = await getFlowsByProcess(sessionData.process_id);
+            setInformationFlows(flowsData);
+          } catch (flowError) {
+            console.error("Failed to load information flows:", flowError);
+          }
+        }
 
         // Join session as participant
         await joinSession(sessionId);
@@ -384,6 +438,108 @@ export default function SessionDetailPage() {
     }
   };
 
+  // Information flow handlers
+  const handleEdgeClickForNewFlow = useCallback((sourceStepId: string, targetStepId: string) => {
+    setNewFlowEdge({ sourceStepId, targetStepId });
+    setSelectedFlowForEdit(null);
+    setFlowPanelMode("create");
+  }, []);
+
+  const handleSelectFlow = useCallback((flowId: string | null) => {
+    if (!flowId) return;
+    const flow = informationFlows.find((f) => f.id === flowId);
+    if (flow) {
+      setSelectedFlowForEdit(flow);
+      setNewFlowEdge(null);
+      setFlowPanelMode("edit");
+    }
+  }, [informationFlows]);
+
+  // Side panel collapse toggle
+  const handleToggleSidePanel = useCallback(() => {
+    setIsSidePanelCollapsed((prev) => {
+      const newValue = !prev;
+      localStorage.setItem("sessions-sidepanel-collapsed", String(newValue));
+      return newValue;
+    });
+  }, []);
+
+  const handleCreateFlow = async (input: CreateInformationFlowInput) => {
+    try {
+      await createFlow(input);
+      if (session?.process_id) {
+        const flowsData = await getFlowsByProcess(session.process_id);
+        setInformationFlows(flowsData);
+      }
+      toast({
+        title: "Flow created",
+        description: "Information flow has been added.",
+      });
+      handleCloseFlowPanel();
+    } catch (error) {
+      console.error("Failed to create flow:", error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to create information flow.",
+      });
+    }
+  };
+
+  const handleSaveFlow = async (flowId: string, updates: UpdateInformationFlowInput) => {
+    try {
+      await updateFlow(flowId, updates);
+      if (session?.process_id) {
+        const flowsData = await getFlowsByProcess(session.process_id);
+        setInformationFlows(flowsData);
+      }
+      toast({
+        title: "Flow updated",
+        description: "Information flow has been saved.",
+      });
+      handleCloseFlowPanel();
+    } catch (error) {
+      console.error("Failed to update flow:", error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to update information flow.",
+      });
+    }
+  };
+
+  const handleDeleteFlow = async (flowId: string) => {
+    try {
+      await deleteFlow(flowId);
+      if (session?.process_id) {
+        const flowsData = await getFlowsByProcess(session.process_id);
+        setInformationFlows(flowsData);
+      }
+      toast({
+        title: "Flow deleted",
+        description: "Information flow has been removed.",
+      });
+      handleCloseFlowPanel();
+    } catch (error) {
+      console.error("Failed to delete flow:", error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to delete information flow.",
+      });
+    }
+  };
+
+  const handleCloseFlowPanel = () => {
+    setFlowPanelMode(null);
+    setSelectedFlowForEdit(null);
+    setNewFlowEdge(null);
+  };
+
+  const getStepName = (stepId: string): string => {
+    return steps.find((s) => s.id === stepId)?.step_name || "Unknown Step";
+  };
+
   // Check if participant is active (active within last 5 minutes)
   const isParticipantActive = (lastActiveAt: string) => {
     const lastActive = new Date(lastActiveAt);
@@ -431,6 +587,7 @@ export default function SessionDetailPage() {
         <Header
           title={session.name}
           description="Active waste walk session"
+          onTitleEdit={handleRenameSession}
           actions={
             <div className="flex items-center gap-2">
               <Button asChild variant="outline" size="sm">
@@ -526,6 +683,9 @@ export default function SessionDetailPage() {
             onStepClick={handleStepClick}
             showHeatmap={showHeatmap}
             onToggleHeatmap={setShowHeatmap}
+            informationFlows={informationFlows}
+            onSelectFlow={handleSelectFlow}
+            onEdgeClickForNewFlow={handleEdgeClickForNewFlow}
           />
           ) : (
             <div className="flex items-center justify-center h-full text-muted-foreground">
@@ -535,80 +695,129 @@ export default function SessionDetailPage() {
         </div>
       </div>
 
-      {/* Side Panel - Desktop */}
-      <div className="hidden lg:flex w-80 border-l bg-white flex-col">
-        {/* Participants */}
-        <div className="p-4 border-b">
-          <h3 className="font-medium mb-3 flex items-center gap-2">
-            <Users className="h-4 w-4" />
-            Participants ({participants.length})
-          </h3>
-          <div className="space-y-2">
-            {participants.map((participant) => (
-              <div
-                key={participant.id}
-                className="flex items-center gap-2 p-2 rounded-lg hover:bg-muted/50"
-              >
-                <div className="relative">
-                  <Avatar className="h-8 w-8">
-                    <AvatarFallback className="bg-brand-gold/20 text-brand-navy text-xs">
-                      {participant.user?.name?.charAt(0) || "?"}
-                    </AvatarFallback>
-                  </Avatar>
-                  {isParticipantActive(participant.last_active_at) && (
-                    <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-brand-emerald rounded-full border-2 border-white" />
-                  )}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">
-                    {participant.user?.name || "Unknown"}
-                  </p>
-                  <p className="text-xs text-muted-foreground capitalize">
-                    {participant.user?.role || "participant"}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
+      {/* Side Panel - Desktop (Collapsible) */}
+      <div
+        className={cn(
+          "hidden lg:flex border-l bg-white flex-col transition-all duration-300 ease-in-out",
+          isSidePanelCollapsed ? "w-12" : "w-80"
+        )}
+      >
+        {/* Collapse Toggle */}
+        <div className="p-2 border-b flex justify-center">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleToggleSidePanel}
+            className="h-8 w-8 p-0"
+            title={isSidePanelCollapsed ? "Expand panel" : "Collapse panel"}
+          >
+            {isSidePanelCollapsed ? (
+              <PanelRightOpen className="h-4 w-4" />
+            ) : (
+              <PanelRightClose className="h-4 w-4" />
+            )}
+          </Button>
         </div>
 
-        {/* Recent Activity */}
-        <div className="flex-1 overflow-hidden flex flex-col">
-          <div className="p-4 border-b">
-            <h3 className="font-medium flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4 text-orange-500" />
-              Recent Activity
-            </h3>
-          </div>
-          <ScrollArea className="flex-1">
-            <div className="p-4 space-y-3">
-              {recentActivity.length > 0 ? (
-                recentActivity.map((activity) => (
-                <div
-                  key={activity.id}
-                  className="p-3 rounded-lg bg-muted/50 space-y-1"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium">{activity.user}</span>
-                    <span className="text-xs text-muted-foreground">
-                      {activity.time}
-                    </span>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                      Tagged{" "}
-                      <span className="text-orange-600">{activity.waste}</span> on{" "}
-                      <span className="font-medium">{activity.step}</span>
-                  </p>
-                </div>
-                ))
-              ) : (
-                <p className="text-sm text-muted-foreground text-center py-4">
-                  No activity yet. Click on a step to start tagging waste.
-                </p>
+        {isSidePanelCollapsed ? (
+          /* Collapsed View - Icons Only */
+          <div className="flex flex-col items-center gap-4 py-4">
+            <button
+              onClick={handleToggleSidePanel}
+              className="flex flex-col items-center gap-1 text-muted-foreground hover:text-foreground transition-colors"
+              title={`Participants (${participants.length})`}
+            >
+              <Users className="h-5 w-5" />
+              <span className="text-xs">{participants.length}</span>
+            </button>
+            <button
+              onClick={handleToggleSidePanel}
+              className="flex flex-col items-center gap-1 text-muted-foreground hover:text-foreground transition-colors"
+              title="Recent Activity"
+            >
+              <AlertTriangle className="h-5 w-5 text-orange-500" />
+              {recentActivity.length > 0 && (
+                <span className="text-xs">{recentActivity.length}</span>
               )}
+            </button>
+          </div>
+        ) : (
+          /* Expanded View - Full Content */
+          <>
+            {/* Participants */}
+            <div className="p-4 border-b">
+              <h3 className="font-medium mb-3 flex items-center gap-2">
+                <Users className="h-4 w-4" />
+                Participants ({participants.length})
+              </h3>
+              <div className="space-y-2">
+                {participants.map((participant) => (
+                  <div
+                    key={participant.id}
+                    className="flex items-center gap-2 p-2 rounded-lg hover:bg-muted/50"
+                  >
+                    <div className="relative">
+                      <Avatar className="h-8 w-8">
+                        <AvatarFallback className="bg-brand-gold/20 text-brand-navy text-xs">
+                          {participant.user?.name?.charAt(0) || "?"}
+                        </AvatarFallback>
+                      </Avatar>
+                      {isParticipantActive(participant.last_active_at) && (
+                        <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-brand-emerald rounded-full border-2 border-white" />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">
+                        {participant.user?.name || "Unknown"}
+                      </p>
+                      <p className="text-xs text-muted-foreground capitalize">
+                        {participant.user?.role || "participant"}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
-          </ScrollArea>
-        </div>
+
+            {/* Recent Activity */}
+            <div className="flex-1 overflow-hidden flex flex-col">
+              <div className="p-4 border-b">
+                <h3 className="font-medium flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4 text-orange-500" />
+                  Recent Activity
+                </h3>
+              </div>
+              <ScrollArea className="flex-1">
+                <div className="p-4 space-y-3">
+                  {recentActivity.length > 0 ? (
+                    recentActivity.map((activity) => (
+                      <div
+                        key={activity.id}
+                        className="p-3 rounded-lg bg-muted/50 space-y-1"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-medium">{activity.user}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {activity.time}
+                          </span>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          Tagged{" "}
+                          <span className="text-orange-600">{activity.waste}</span> on{" "}
+                          <span className="font-medium">{activity.step}</span>
+                        </p>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-sm text-muted-foreground text-center py-4">
+                      No activity yet. Click on a step to start tagging waste.
+                    </p>
+                  )}
+                </div>
+              </ScrollArea>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Side Panel - Mobile Sheet */}
@@ -697,6 +906,9 @@ export default function SessionDetailPage() {
         onStartTagging={handleStartTagging}
         onEditObservation={session.status === "active" ? handleEditObservation : undefined}
         sessionActive={session.status === "active"}
+        informationFlows={informationFlows}
+        showIOPanel={true}
+        processId={session.process_id}
       />
 
       {/* Waste Tagging Panel */}
@@ -727,6 +939,38 @@ export default function SessionDetailPage() {
         isDeleting={isDeletingObservation}
         currentUserId={currentUserId}
       />
+
+      {/* Flow Detail Panel */}
+      {flowPanelMode && (
+        <FlowDetailPanel
+          mode={flowPanelMode}
+          flow={selectedFlowForEdit}
+          sourceStepId={newFlowEdge?.sourceStepId}
+          targetStepId={newFlowEdge?.targetStepId}
+          processId={session?.process_id}
+          isOpen={flowPanelMode !== null}
+          onClose={handleCloseFlowPanel}
+          onCreate={handleCreateFlow}
+          onSave={handleSaveFlow}
+          onDelete={handleDeleteFlow}
+          wasteTypes={wasteTypes}
+          observations={observations}
+          sourceStepName={
+            flowPanelMode === "create" && newFlowEdge
+              ? getStepName(newFlowEdge.sourceStepId)
+              : selectedFlowForEdit?.source_step_id
+              ? getStepName(selectedFlowForEdit.source_step_id)
+              : undefined
+          }
+          targetStepName={
+            flowPanelMode === "create" && newFlowEdge
+              ? getStepName(newFlowEdge.targetStepId)
+              : selectedFlowForEdit?.target_step_id
+              ? getStepName(selectedFlowForEdit.target_step_id)
+              : undefined
+          }
+        />
+      )}
     </div>
   );
 }

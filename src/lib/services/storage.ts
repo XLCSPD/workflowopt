@@ -2,7 +2,7 @@ import { getSupabaseClient } from "@/lib/supabase/client";
 
 const supabase = getSupabaseClient();
 
-export type StorageBucket = "training-content" | "observation-attachments" | "avatars";
+export type StorageBucket = "training-content" | "observation-attachments" | "step-attachments" | "avatars";
 
 // ============================================
 // FILE UPLOAD
@@ -53,6 +53,17 @@ export async function uploadAvatar(file: File, userId: string) {
   const ext = file.name.split(".").pop();
   const path = `${userId}/avatar.${ext}`;
   return uploadFile("avatars", path, file);
+}
+
+export async function uploadStepAttachment(
+  file: File,
+  processId: string,
+  stepId: string
+) {
+  const ext = file.name.split(".").pop();
+  const uniqueId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  const path = `${processId}/${stepId}/${uniqueId}.${ext}`;
+  return uploadFile("step-attachments", path, file);
 }
 
 // ============================================

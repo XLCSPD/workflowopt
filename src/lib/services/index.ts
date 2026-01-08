@@ -13,5 +13,7 @@ export * from "./workflowImport";
 export * from "./organizations";
 export * from "./insights";
 export * from "./notifications";
+export * from "./informationFlows";
+export * from "./stepAttachments";
 // workflowEditor exports are imported directly where needed to avoid conflicts
 

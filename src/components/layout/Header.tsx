@@ -1,9 +1,8 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Bell, Search, CheckCheck, Trash2, Loader2 } from "lucide-react";
+import { Bell, CheckCheck, Trash2, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -26,14 +25,16 @@ import {
 import { useAuthStore } from "@/lib/stores/authStore";
 import { cn } from "@/lib/utils";
 import { HelpButton } from "@/components/help";
+import { EditableTitle } from "@/components/ui/editable-title";
 
 interface HeaderProps {
   title: string;
   description?: string;
   actions?: React.ReactNode;
+  onTitleEdit?: (newTitle: string) => Promise<void>;
 }
 
-export function Header({ title, description, actions }: HeaderProps) {
+export function Header({ title, description, actions, onTitleEdit }: HeaderProps) {
   const { user } = useAuthStore();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -119,29 +120,24 @@ export function Header({ title, description, actions }: HeaderProps) {
 
   return (
     <header className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4 min-h-16 py-3 sm:py-0 px-4 sm:px-6 bg-white border-b border-border">
-      <div className="flex-1 min-w-0">
-        <h1 className="text-lg sm:text-xl font-semibold text-brand-navy truncate">{title}</h1>
+      <div className="min-w-0 max-w-[280px] sm:max-w-[320px] lg:max-w-[400px] xl:max-w-[500px] shrink-0">
+        {onTitleEdit ? (
+          <EditableTitle
+            value={title}
+            onSave={onTitleEdit}
+            className="text-lg sm:text-xl font-semibold text-brand-navy"
+          />
+        ) : (
+          <h1 className="text-lg sm:text-xl font-semibold text-brand-navy truncate">{title}</h1>
+        )}
         {description && (
           <p className="text-xs sm:text-sm text-muted-foreground truncate">{description}</p>
         )}
       </div>
 
-      <div className="flex items-center gap-2 sm:gap-4 flex-wrap justify-end w-full sm:w-auto">
-        {/* Search - hidden on mobile/tablet */}
-        <div className="relative hidden xl:block">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search..."
-            className="w-48 xl:w-64 pl-9 h-9 bg-brand-platinum/50 border-0 focus-visible:ring-brand-gold"
-          />
-        </div>
-
-        {/* Actions slot - shown on larger screens, hidden on mobile for some pages */}
-        <div className="hidden sm:flex items-center gap-2">
-          {actions}
-        </div>
-        {/* Compact actions on mobile */}
-        <div className="sm:hidden flex items-center gap-2">
+      <div className="flex items-center gap-2 sm:gap-3 flex-nowrap justify-end flex-1">
+        {/* Actions slot */}
+        <div className="flex items-center gap-2">
           {actions}
         </div>
 

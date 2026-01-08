@@ -3,7 +3,6 @@
 import { useMemo, useEffect, useCallback, useRef, useState } from "react";
 import ReactFlow, {
   Background,
-  MiniMap,
   useNodesState,
   useEdgesState,
   useReactFlow,
@@ -22,17 +21,30 @@ import ReactFlow, {
 import "reactflow/dist/style.css";
 import Dagre from "@dagrejs/dagre";
 import { StepNode } from "./StepNode";
+import { FlowEdge } from "./FlowEdge";
+import { FlowLegend } from "./FlowLegend";
+import { CollapsibleMiniMap } from "./CollapsibleMiniMap";
+import { DraggablePanel } from "@/components/ui/draggable-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { Flame, LayoutGrid, RotateCcw, Lock, ZoomIn, ZoomOut } from "lucide-react";
-import type { ProcessStep } from "@/types";
+import { Flame, LayoutGrid, RotateCcw, Lock, ZoomIn, ZoomOut, GitBranch } from "lucide-react";
+import type { ProcessStep, InformationFlowWithRelations, FlowType } from "@/types";
+import { FLOW_TYPE_CONFIG } from "@/types/informationFlow";
 import { STEP_TOOLBOX_MIME } from "@/components/workflow/StepToolbox";
 
 const nodeTypes = {
   stepNode: StepNode,
 };
+
+const edgeTypes = {
+  flowEdge: FlowEdge,
+};
+
+// Stable defaults to avoid creating new objects on each render (which causes infinite loops)
+const DEFAULT_VISIBLE_FLOW_TYPES = new Set<FlowType>(["data", "document", "approval", "system", "notification"]);
+const DEFAULT_INFORMATION_FLOWS: InformationFlowWithRelations[] = [];
 
 interface ProcessMapProps {
   workflowId: string;
@@ -65,6 +77,18 @@ interface ProcessMapProps {
   onDeleteConnection?: (sourceId: string, targetId: string) => void;
   onReactFlowInit?: (instance: ReactFlowInstance) => void;
   onPositionsChange?: (positions: { id: string; x: number; y: number }[]) => void;
+  // Information Flow props
+  informationFlows?: InformationFlowWithRelations[];
+  showInformationFlows?: boolean;
+  onToggleShowFlows?: (show: boolean) => void;
+  visibleFlowTypes?: Set<FlowType>;
+  onToggleFlowType?: (type: FlowType) => void;
+  onToggleAllFlowTypes?: (visible: boolean) => void;
+  selectedFlowId?: string | null;
+  onSelectFlow?: (flowId: string | null) => void;
+  showFlowLabels?: boolean;
+  // Callback when clicking an edge without a flow (to create a new flow)
+  onEdgeClickForNewFlow?: (sourceStepId: string, targetStepId: string) => void;
 }
 
 // Helper to get localStorage key for a workflow
@@ -184,11 +208,66 @@ function ProcessMapInner({
   onDeleteConnection,
   onReactFlowInit,
   onPositionsChange,
+  // Information Flow props
+  informationFlows = DEFAULT_INFORMATION_FLOWS,
+  showInformationFlows = false,
+  onToggleShowFlows,
+  visibleFlowTypes = DEFAULT_VISIBLE_FLOW_TYPES,
+  onToggleFlowType,
+  onToggleAllFlowTypes,
+  selectedFlowId,
+  onSelectFlow,
+  showFlowLabels = true,
+  onEdgeClickForNewFlow,
 }: ProcessMapProps) {
   const { fitView, zoomIn, zoomOut, screenToFlowPosition, getNodes } = useReactFlow();
   const viewport = useViewport();
   const canvasRef = useRef<HTMLDivElement | null>(null);
   
+  // Local state for information flows when parent doesn't provide callbacks
+  const [localShowFlows, setLocalShowFlows] = useState(showInformationFlows);
+  const [localVisibleTypes, setLocalVisibleTypes] = useState<Set<FlowType>>(visibleFlowTypes);
+
+  // Determine effective values and handlers
+  const effectiveShowFlows = onToggleShowFlows ? showInformationFlows : localShowFlows;
+  const effectiveVisibleTypes = onToggleFlowType ? visibleFlowTypes : localVisibleTypes;
+
+  const handleToggleShowFlows = useCallback((show: boolean) => {
+    if (onToggleShowFlows) {
+      onToggleShowFlows(show);
+    } else {
+      setLocalShowFlows(show);
+    }
+  }, [onToggleShowFlows]);
+
+  const handleToggleFlowType = useCallback((type: FlowType) => {
+    if (onToggleFlowType) {
+      onToggleFlowType(type);
+    } else {
+      setLocalVisibleTypes(prev => {
+        const newSet = new Set(prev);
+        if (newSet.has(type)) {
+          newSet.delete(type);
+        } else {
+          newSet.add(type);
+        }
+        return newSet;
+      });
+    }
+  }, [onToggleFlowType]);
+
+  const handleToggleAllFlowTypes = useCallback((visible: boolean) => {
+    if (onToggleAllFlowTypes) {
+      onToggleAllFlowTypes(visible);
+    } else {
+      if (visible) {
+        setLocalVisibleTypes(new Set<FlowType>(["data", "document", "approval", "system", "notification"]));
+      } else {
+        setLocalVisibleTypes(new Set<FlowType>());
+      }
+    }
+  }, [onToggleAllFlowTypes]);
+
   // Use ref to avoid recreating nodes when onStepClick changes
   const onStepClickRef = useRef(onStepClick);
   onStepClickRef.current = onStepClick;
@@ -219,6 +298,12 @@ function ProcessMapInner({
 
   const onDeleteStepRef = useRef(onDeleteStep);
   onDeleteStepRef.current = onDeleteStep;
+
+  const onSelectFlowRef = useRef(onSelectFlow);
+  onSelectFlowRef.current = onSelectFlow;
+
+  const onEdgeClickForNewFlowRef = useRef(onEdgeClickForNewFlow);
+  onEdgeClickForNewFlowRef.current = onEdgeClickForNewFlow;
 
   // Track if layout has been saved
   const [hasLayoutSaved, setHasLayoutSaved] = useState(false);
@@ -495,21 +580,89 @@ function ProcessMapInner({
     workflowId,
   ]);
 
+  // Create a lookup map for flows by source-target pair
+  const flowLookup = useMemo(() => {
+    const lookup = new Map<string, InformationFlowWithRelations>();
+    informationFlows.forEach((flow) => {
+      if (flow.source_step_id && flow.target_step_id) {
+        const key = `${flow.source_step_id}-${flow.target_step_id}`;
+        lookup.set(key, flow);
+      }
+    });
+    return lookup;
+  }, [informationFlows]);
+
+  // Calculate flow counts by type for the legend
+  const flowCounts = useMemo(() => {
+    const counts: Record<FlowType, number> = {
+      data: 0,
+      document: 0,
+      approval: 0,
+      system: 0,
+      notification: 0,
+    };
+    informationFlows.forEach((flow) => {
+      counts[flow.flow_type]++;
+    });
+    return counts;
+  }, [informationFlows]);
+
   // Generate edges
   const initialEdges: Edge[] = useMemo(() => {
-    return connections.map((conn, idx) => ({
-      id: `edge-${idx}`,
-      source: conn.source,
-      target: conn.target,
-      type: "smoothstep",
-      animated: false,
-      style: { stroke: "#545454", strokeWidth: 2 },
-      markerEnd: {
-        type: MarkerType.ArrowClosed,
-        color: "#545454",
-      },
-    }));
-  }, [connections]);
+    return connections.map((conn, idx) => {
+      const flowKey = `${conn.source}-${conn.target}`;
+      const flow = flowLookup.get(flowKey);
+      const hasFlow = flow && effectiveShowFlows && effectiveVisibleTypes.has(flow.flow_type);
+
+      if (hasFlow && flow) {
+        // Use FlowEdge type with flow styling
+        const typeConfig = FLOW_TYPE_CONFIG[flow.flow_type];
+        const styleOverride = flow.metadata?.style || {};
+        const color = styleOverride.color || typeConfig.color;
+        const lineStyle = styleOverride.lineStyle || "solid";
+        const thickness = styleOverride.thickness || "normal";
+        const strokeWidth = thickness === "thin" ? 1 : thickness === "thick" ? 3 : 2;
+        const strokeDasharray = lineStyle === "dashed" ? "8,4" : lineStyle === "dotted" ? "2,2" : undefined;
+
+        return {
+          id: `edge-${idx}`,
+          source: conn.source,
+          target: conn.target,
+          type: "flowEdge",
+          animated: false,
+          data: {
+            flow,
+            showLabel: showFlowLabels,
+            isSelected: selectedFlowId === flow.id,
+            onClick: () => onSelectFlowRef.current?.(flow.id),
+          },
+          style: {
+            stroke: color,
+            strokeWidth,
+            strokeDasharray,
+          },
+          markerEnd: {
+            type: MarkerType.ArrowClosed,
+            color,
+          },
+        };
+      }
+
+      // Default edge styling
+      return {
+        id: `edge-${idx}`,
+        source: conn.source,
+        target: conn.target,
+        type: "smoothstep",
+        animated: false,
+        style: { stroke: "#545454", strokeWidth: 2 },
+        markerEnd: {
+          type: MarkerType.ArrowClosed,
+          color: "#545454",
+        },
+      };
+    });
+  }, [connections, flowLookup, effectiveShowFlows, effectiveVisibleTypes, showFlowLabels, selectedFlowId]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
@@ -579,6 +732,26 @@ function ProcessMapInner({
       })
     );
   }, [selectedStepId, selectedStepIds, observations, showHeatmap, inlineEditingStepId, setNodes]);
+
+  // Update edges when initialEdges changes (which already has proper dependencies)
+  // Using a ref to track if this is the first render to avoid unnecessary updates
+  const isFirstRender = useRef(true);
+  const prevInitialEdgesRef = useRef(initialEdges);
+
+  useEffect(() => {
+    // Skip on first render since useEdgesState already sets initial value
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      prevInitialEdgesRef.current = initialEdges;
+      return;
+    }
+
+    // Only update if initialEdges reference changed
+    if (prevInitialEdgesRef.current !== initialEdges) {
+      prevInitialEdgesRef.current = initialEdges;
+      setEdges(initialEdges);
+    }
+  }, [initialEdges, setEdges]);
 
   // Handle selection changes from React Flow (for multi-select via shift+click or drag selection)
   const handleSelectionChange = useCallback(({ nodes: selectedNodes }: { nodes: Node[] }) => {
@@ -811,6 +984,7 @@ function ProcessMapInner({
           onInit={onReactFlowInit}
           onSelectionChange={handleSelectionChange}
           nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
           connectionMode={ConnectionMode.Loose}
           connectOnClick={isEditMode}
           connectionLineStyle={{ stroke: "hsl(var(--brand-gold))", strokeWidth: 2 }}
@@ -849,14 +1023,26 @@ function ProcessMapInner({
               onConnect(params.source, params.target);
             }
           } : undefined}
-          onEdgeClick={isEditMode ? (_event, edge) => {
-            if (onDeleteConnection && confirm("Delete this connection?")) {
+          onEdgeClick={(_event, edge) => {
+            // If showing information flows...
+            if (effectiveShowFlows) {
+              if (edge.data?.flow) {
+                // Existing flow - select it
+                onSelectFlowRef.current?.(edge.data.flow.id);
+              } else {
+                // No flow on this edge - trigger create flow callback
+                onEdgeClickForNewFlowRef.current?.(edge.source, edge.target);
+              }
+              return;
+            }
+            // In edit mode, clicking edge deletes the connection
+            if (isEditMode && onDeleteConnection && confirm("Delete this connection?")) {
               onDeleteConnection(edge.source, edge.target);
             }
-          } : undefined}
+          }}
         >
           <Background color="#e5e7eb" gap={20} />
-          <MiniMap
+          <CollapsibleMiniMap
             nodeColor={(node) => {
               const intensity = node.data?.heatmapIntensity;
               if (intensity === "critical") return "#EF4444";
@@ -866,7 +1052,6 @@ function ProcessMapInner({
               return "#94A3B8";
             }}
             maskColor="rgba(255, 255, 255, 0.8)"
-            className="bg-white border border-border rounded-lg"
           />
 
           {/* Controls Panel */}
@@ -940,27 +1125,64 @@ function ProcessMapInner({
                 />
               </div>
             )}
+            {!isEditMode && (
+              <div className="flex items-center gap-2 bg-white rounded-lg border border-border px-3 py-2 shadow-sm">
+                <GitBranch className={`h-4 w-4 ${effectiveShowFlows ? "text-blue-500" : "text-muted-foreground"}`} />
+                <Label htmlFor="flows-toggle" className="text-sm font-medium cursor-pointer">
+                  Info Flows
+                </Label>
+                <Switch
+                  id="flows-toggle"
+                  checked={effectiveShowFlows}
+                  onCheckedChange={handleToggleShowFlows}
+                />
+              </div>
+            )}
           </Panel>
 
-          {/* Legend */}
+          {/* Heatmap Legend - Draggable */}
           {showHeatmap && (
-            <Panel position="bottom-right" className="bg-white rounded-lg border border-border p-3 shadow-sm">
-              <p className="text-xs font-medium mb-2">Priority Score</p>
-              <div className="flex gap-2">
-                <Badge variant="outline" className="bg-green-50 border-green-500 text-green-700 text-xs">
-                  Low (1-4)
-                </Badge>
-                <Badge variant="outline" className="bg-yellow-50 border-yellow-500 text-yellow-700 text-xs">
-                  Medium (5-9)
-                </Badge>
-                <Badge variant="outline" className="bg-orange-50 border-orange-500 text-orange-700 text-xs">
-                  High (10-14)
-                </Badge>
-                <Badge variant="outline" className="bg-red-50 border-red-500 text-red-700 text-xs">
-                  Critical (15+)
-                </Badge>
+            <DraggablePanel
+              id="heatmap-legend"
+              defaultPosition={{ x: 20, y: 20 }}
+              anchor="bottom-right"
+              className="bg-white rounded-b-lg"
+            >
+              <div className="p-3 border-x border-b border-border">
+                <p className="text-xs font-medium mb-2">Priority Score</p>
+                <div className="flex gap-2">
+                  <Badge variant="outline" className="bg-green-50 border-green-500 text-green-700 text-xs">
+                    Low (1-4)
+                  </Badge>
+                  <Badge variant="outline" className="bg-yellow-50 border-yellow-500 text-yellow-700 text-xs">
+                    Medium (5-9)
+                  </Badge>
+                  <Badge variant="outline" className="bg-orange-50 border-orange-500 text-orange-700 text-xs">
+                    High (10-14)
+                  </Badge>
+                  <Badge variant="outline" className="bg-red-50 border-red-500 text-red-700 text-xs">
+                    Critical (15+)
+                  </Badge>
+                </div>
               </div>
-            </Panel>
+            </DraggablePanel>
+          )}
+
+          {/* Information Flow Legend - Draggable */}
+          {effectiveShowFlows && (
+            <DraggablePanel
+              id="flow-legend"
+              defaultPosition={{ x: 20, y: 20 }}
+              anchor="bottom-left"
+              className="bg-white rounded-b-lg"
+            >
+              <FlowLegend
+                visibleTypes={effectiveVisibleTypes}
+                onToggleType={handleToggleFlowType}
+                onToggleAll={handleToggleAllFlowTypes}
+                flowCounts={flowCounts}
+              />
+            </DraggablePanel>
           )}
         </ReactFlow>
       </div>

@@ -85,13 +85,6 @@ const stages: Array<{
     description: "Generate and refine solutions",
   },
   {
-    key: "sequencing",
-    label: "Roadmap Builder",
-    shortLabel: "Sequencing",
-    icon: GitBranch,
-    description: "Sequence into implementation waves",
-  },
-  {
     key: "designer",
     label: "Future State Designer",
     shortLabel: "Designer",
@@ -103,7 +96,14 @@ const stages: Array<{
     label: "Compare & Value",
     shortLabel: "Compare",
     icon: FileBarChart,
-    description: "Compare versions and build value case",
+    description: "Compare current vs future state",
+  },
+  {
+    key: "sequencing",
+    label: "Roadmap Builder",
+    shortLabel: "Sequencing",
+    icon: GitBranch,
+    description: "Plan implementation waves",
   },
   {
     key: "export",

@@ -53,7 +53,7 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useUndoRedo } from "@/hooks/useUndoRedo";
-import { getWorkflowWithDetails } from "@/lib/services/workflows";
+import { getWorkflowWithDetails, updateProcess } from "@/lib/services/workflows";
 import { exportWorkflowToPDF } from "@/lib/services/export";
 import type { ReactFlowInstance } from "reactflow";
 import {
@@ -73,9 +73,12 @@ import {
   deleteProcess,
   updateStepPositions,
 } from "@/lib/services/workflowEditor";
-import type { Process, ProcessLane, ProcessStep, StepType } from "@/types";
+import type { Process, ProcessLane, ProcessStep, StepType, InformationFlowWithRelations, CreateInformationFlowInput, UpdateInformationFlowInput, WasteType } from "@/types";
 import type { StepConnection } from "@/lib/services/workflows";
 import { StepToolbox } from "@/components/workflow/StepToolbox";
+import { FlowDetailPanel } from "@/components/workflow/FlowDetailPanel";
+import { getFlowsByProcess, createFlow, updateFlow, deleteFlow } from "@/lib/services/informationFlows";
+import { getWasteTypes } from "@/lib/services/wasteTypes";
 import { SwimlaneManager } from "@/components/workflow/SwimlaneManager";
 import {
   WorkflowContextDrawer,
@@ -153,6 +156,13 @@ export default function WorkflowDetailPage() {
   const [isContextDrawerOpen, setIsContextDrawerOpen] = useState(false);
   const [contextCompleteness, setContextCompleteness] = useState(0);
   const laneNames = useMemo(() => lanes.map((l) => l.name), [lanes]);
+
+  // Information Flow state
+  const [informationFlows, setInformationFlows] = useState<InformationFlowWithRelations[]>([]);
+  const [flowPanelMode, setFlowPanelMode] = useState<"create" | "edit" | null>(null);
+  const [selectedFlowForEdit, setSelectedFlowForEdit] = useState<InformationFlowWithRelations | null>(null);
+  const [newFlowEdge, setNewFlowEdge] = useState<{ sourceStepId: string; targetStepId: string } | null>(null);
+  const [wasteTypes, setWasteTypes] = useState<WasteType[]>([]);
 
   // Lineage display state (AC-4.2)
   const [sourceWorkflowName, setSourceWorkflowName] = useState<string | null>(null);
@@ -246,6 +256,23 @@ export default function WorkflowDetailPage() {
     }
   }, [workflow, newLaneName, laneNames, toast]);
 
+  // Handle rename workflow
+  const handleRenameWorkflow = useCallback(async (newName: string) => {
+    if (!workflow) return;
+    const trimmedName = newName.trim();
+    if (!trimmedName || trimmedName === workflow.name) return;
+
+    try {
+      await updateProcess(workflow.id, { name: trimmedName });
+      setWorkflow((prev) => prev ? { ...prev, name: trimmedName } : null);
+      toast({ title: "Workflow renamed successfully" });
+    } catch (error) {
+      console.error("Failed to rename workflow:", error);
+      toast({ variant: "destructive", title: "Error", description: "Failed to rename workflow." });
+      throw error; // Re-throw so EditableTitle stays in edit mode
+    }
+  }, [workflow, toast]);
+
   // Fetch workflow data
   useEffect(() => {
     const loadWorkflow = async () => {
@@ -292,6 +319,23 @@ export default function WorkflowDetailPage() {
           lane: resolvedLanes[0]?.name ?? prev.lane ?? "Requester",
         }));
 
+        // Load information flows
+        try {
+          const flows = await getFlowsByProcess(workflowId);
+          setInformationFlows(flows);
+        } catch (flowError) {
+          console.error("Failed to load information flows:", flowError);
+          // Don't fail the whole page load if flows fail
+        }
+
+        // Load waste types for flow panel
+        try {
+          const types = await getWasteTypes();
+          setWasteTypes(types);
+        } catch (wasteError) {
+          console.error("Failed to load waste types:", wasteError);
+        }
+
         // Reset UI/editor state on (re)load
         setSelectedStepId(null);
         setIsPanelOpen(false);
@@ -299,6 +343,9 @@ export default function WorkflowDetailPage() {
         setIsEditStepDialogOpen(false);
         setIsAddStepDialogOpen(false);
         setEditingStep(null);
+        setFlowPanelMode(null);
+        setSelectedFlowForEdit(null);
+        setNewFlowEdge(null);
         clearHistory();
       } catch (error) {
         console.error("Failed to load workflow:", error);
@@ -338,6 +385,7 @@ export default function WorkflowDetailPage() {
 
   const handleStepClick = useCallback(
     (stepId: string) => {
+      console.log("Workflows page: handleStepClick called with stepId:", stepId, "isEditMode:", isEditMode);
       if (isEditMode) {
         // In edit mode, open edit dialog
         const step = steps.find((s) => s.id === stepId);
@@ -356,6 +404,7 @@ export default function WorkflowDetailPage() {
           setIsEditStepDialogOpen(true);
         }
       } else {
+        console.log("Workflows page: Opening panel for step:", stepId);
     setSelectedStepId(stepId);
     setIsPanelOpen(true);
       }
@@ -1281,6 +1330,111 @@ export default function WorkflowDetailPage() {
     });
   };
 
+  // Information Flow handlers
+  const handleEdgeClickForNewFlow = useCallback((sourceStepId: string, targetStepId: string) => {
+    // Check if flow already exists for this edge
+    const existingFlow = informationFlows.find(
+      (f) => f.source_step_id === sourceStepId && f.target_step_id === targetStepId
+    );
+
+    if (existingFlow) {
+      // Open edit panel
+      setSelectedFlowForEdit(existingFlow);
+      setFlowPanelMode("edit");
+    } else {
+      // Open create panel
+      setNewFlowEdge({ sourceStepId, targetStepId });
+      setFlowPanelMode("create");
+    }
+  }, [informationFlows]);
+
+  const handleSelectFlow = useCallback((flowId: string | null) => {
+    if (!flowId) {
+      setFlowPanelMode(null);
+      setSelectedFlowForEdit(null);
+      return;
+    }
+    const flow = informationFlows.find((f) => f.id === flowId);
+    if (flow) {
+      setSelectedFlowForEdit(flow);
+      setFlowPanelMode("edit");
+    }
+  }, [informationFlows]);
+
+  const handleCreateFlow = useCallback(async (input: CreateInformationFlowInput) => {
+    try {
+      const newFlow = await createFlow(input);
+      // Refetch to get the full flow with relations
+      const flows = await getFlowsByProcess(workflow?.id || "");
+      setInformationFlows(flows);
+      toast({
+        title: "Flow created",
+        description: `"${newFlow.name}" has been added.`,
+      });
+    } catch (error) {
+      console.error("Failed to create flow:", error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to create information flow.",
+      });
+      throw error;
+    }
+  }, [workflow?.id, toast]);
+
+  const handleSaveFlow = useCallback(async (flowId: string, updates: UpdateInformationFlowInput) => {
+    try {
+      await updateFlow(flowId, updates);
+      // Refetch to get updated flow with relations
+      const flows = await getFlowsByProcess(workflow?.id || "");
+      setInformationFlows(flows);
+      toast({
+        title: "Flow updated",
+        description: "Information flow has been saved.",
+      });
+    } catch (error) {
+      console.error("Failed to update flow:", error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to update information flow.",
+      });
+      throw error;
+    }
+  }, [workflow?.id, toast]);
+
+  const handleDeleteFlow = useCallback(async (flowId: string) => {
+    try {
+      await deleteFlow(flowId);
+      setInformationFlows((prev) => prev.filter((f) => f.id !== flowId));
+      toast({
+        title: "Flow deleted",
+        description: "Information flow has been removed.",
+      });
+    } catch (error) {
+      console.error("Failed to delete flow:", error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to delete information flow.",
+      });
+      throw error;
+    }
+  }, [toast]);
+
+  const handleCloseFlowPanel = useCallback(() => {
+    setFlowPanelMode(null);
+    setSelectedFlowForEdit(null);
+    setNewFlowEdge(null);
+  }, []);
+
+  // Get step names for the flow panel
+  const getStepName = useCallback((stepId: string | null | undefined) => {
+    if (!stepId) return undefined;
+    const step = steps.find((s) => s.id === stepId);
+    return step?.step_name;
+  }, [steps]);
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -1305,6 +1459,7 @@ export default function WorkflowDetailPage() {
       <Header
         title={workflow.name}
         description={workflow.description || "No description"}
+        onTitleEdit={handleRenameWorkflow}
         actions={
           <div className="flex items-center gap-2">
             <Button asChild variant="ghost" size="sm">
@@ -1547,6 +1702,10 @@ export default function WorkflowDetailPage() {
               reactFlowInstanceRef.current = instance;
             }}
             onPositionsChange={handlePositionsChange}
+            // Information Flow props
+            informationFlows={informationFlows}
+            onSelectFlow={handleSelectFlow}
+            onEdgeClickForNewFlow={handleEdgeClickForNewFlow}
           />
 
           {steps.length === 0 && (
@@ -1624,6 +1783,9 @@ export default function WorkflowDetailPage() {
             );
         }}
         sessionActive={false}
+        informationFlows={informationFlows}
+        showIOPanel={true}
+        processId={params.id as string}
       />
       )}
 
@@ -2029,6 +2191,26 @@ export default function WorkflowDetailPage() {
           open={isCopyDialogOpen}
           onOpenChange={setIsCopyDialogOpen}
           workflow={workflow}
+        />
+      )}
+
+      {/* Flow Detail Panel - for creating and editing information flows */}
+      {flowPanelMode && (
+        <FlowDetailPanel
+          mode={flowPanelMode}
+          flow={selectedFlowForEdit}
+          sourceStepId={flowPanelMode === "create" ? newFlowEdge?.sourceStepId : selectedFlowForEdit?.source_step_id || undefined}
+          targetStepId={flowPanelMode === "create" ? newFlowEdge?.targetStepId : selectedFlowForEdit?.target_step_id || undefined}
+          processId={workflow?.id}
+          isOpen={flowPanelMode !== null}
+          onClose={handleCloseFlowPanel}
+          onCreate={handleCreateFlow}
+          onSave={handleSaveFlow}
+          onDelete={handleDeleteFlow}
+          wasteTypes={wasteTypes}
+          observations={[]}
+          sourceStepName={getStepName(flowPanelMode === "create" ? newFlowEdge?.sourceStepId : selectedFlowForEdit?.source_step_id)}
+          targetStepName={getStepName(flowPanelMode === "create" ? newFlowEdge?.targetStepId : selectedFlowForEdit?.target_step_id)}
         />
       )}
     </div>

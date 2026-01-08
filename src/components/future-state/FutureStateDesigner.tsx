@@ -14,6 +14,7 @@ import { HorizontalFlowView } from "./HorizontalFlowView";
 import { FutureStateToolbox } from "./FutureStateToolbox";
 import { VersionPanel } from "./VersionPanel";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { EditableTitle } from "@/components/ui/editable-title";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -57,8 +58,20 @@ import type {
   ObservationWithWasteTypes,
   WasteType,
   NodeAction,
+  InformationFlowWithRelations,
 } from "@/types";
 import type { useRealtimeStudio } from "@/lib/hooks/useRealtimeStudio";
+import {
+  getFlowsByProcess,
+  createFlow,
+  updateFlow,
+  deleteFlow,
+} from "@/lib/services/informationFlows";
+import { FlowDetailPanel } from "@/components/workflow/FlowDetailPanel";
+import type {
+  CreateInformationFlowInput,
+  UpdateInformationFlowInput,
+} from "@/types/informationFlow";
 
 interface FutureStateDesignerProps {
   sessionId: string;
@@ -116,6 +129,12 @@ export function FutureStateDesigner({
   // Annotations state - will be used for displaying annotations in future phases
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [annotations, setAnnotations] = useState<FutureStateAnnotation[]>([]);
+
+  // Information flows state
+  const [informationFlows, setInformationFlows] = useState<InformationFlowWithRelations[]>([]);
+  const [flowPanelMode, setFlowPanelMode] = useState<"create" | "edit" | null>(null);
+  const [selectedFlowForEdit, setSelectedFlowForEdit] = useState<InformationFlowWithRelations | null>(null);
+  const [newFlowEdge, setNewFlowEdge] = useState<{ sourceStepId: string; targetStepId: string } | null>(null);
 
   // Ref to access selectedFutureState in callbacks without triggering re-creation
   const selectedFutureStateRef = useRef<FutureStateWithGraph | null>(null);
@@ -237,6 +256,14 @@ export function FutureStateDesigner({
         })) as ObservationWithWasteTypes[];
         setObservations(transformedObs);
       }
+
+      // Fetch information flows for the process
+      try {
+        const flowsData = await getFlowsByProcess(processId);
+        setInformationFlows(flowsData);
+      } catch (flowError) {
+        console.error("Error fetching information flows:", flowError);
+      }
     } catch (error) {
       console.error("Error:", error);
     } finally {
@@ -268,6 +295,47 @@ export function FutureStateDesigner({
     console.log("[fetchFutureStateGraph] Got data - nodes:", data?.nodes?.length, "edges:", data?.edges?.length);
     setSelectedFutureState(data as FutureStateWithGraph);
   };
+
+  // Handle rename future state
+  const handleRenameFutureState = useCallback(async (newName: string) => {
+    if (!selectedFutureState) return;
+    const trimmedName = newName.trim();
+    if (!trimmedName || trimmedName === selectedFutureState.name) return;
+
+    try {
+      const response = await fetch("/api/future-state/versions", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          versionId: selectedFutureState.id,
+          updates: { name: trimmedName },
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to rename future state");
+      }
+
+      // Update local state
+      setSelectedFutureState((prev) =>
+        prev ? { ...prev, name: trimmedName } : null
+      );
+      setFutureStates((prev) =>
+        prev.map((fs) =>
+          fs.id === selectedFutureState.id ? { ...fs, name: trimmedName } : fs
+        )
+      );
+      toast({ title: "Future state renamed successfully" });
+    } catch (error) {
+      console.error("Failed to rename future state:", error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to rename future state.",
+      });
+      throw error; // Re-throw so EditableTitle stays in edit mode
+    }
+  }, [selectedFutureState, toast]);
 
   useEffect(() => {
     fetchData();
@@ -377,6 +445,18 @@ export function FutureStateDesigner({
     });
     return Array.from(unique.values());
   }, [observationsByStep]);
+
+  // Get all unique waste types from observations (for FlowDetailPanel)
+  const allWasteTypes = useMemo(() => {
+    const wasteTypes = observations.flatMap((obs) => obs.waste_types || []);
+    const unique = new Map<string, WasteType>();
+    wasteTypes.forEach((wt) => {
+      if (wt && !unique.has(wt.id)) {
+        unique.set(wt.id, wt);
+      }
+    });
+    return Array.from(unique.values());
+  }, [observations]);
 
   // Group nodes by lane
   const nodesByLane = useMemo(() => {
@@ -586,6 +666,123 @@ export function FutureStateDesigner({
     }
   }, [toast]);
 
+  // Information flow handlers
+  const handleEdgeClickForNewFlow = useCallback((sourceNodeId: string, targetNodeId: string) => {
+    // Map node IDs to their original step IDs (for nodes copied from current state)
+    // or use the node ID directly if it's a new node without a source step
+    const sourceNode = selectedFutureState?.nodes.find(n => n.id === sourceNodeId);
+    const targetNode = selectedFutureState?.nodes.find(n => n.id === targetNodeId);
+
+    // Use source_step_id if available (for nodes copied from current state)
+    // Fall back to looking up in currentSteps if the nodeId matches a step ID
+    const sourceStepId = sourceNode?.source_step_id ||
+      (currentSteps.find(s => s.id === sourceNodeId) ? sourceNodeId : null);
+    const targetStepId = targetNode?.source_step_id ||
+      (currentSteps.find(s => s.id === targetNodeId) ? targetNodeId : null);
+
+    if (!sourceStepId || !targetStepId) {
+      toast({
+        variant: "destructive",
+        title: "Cannot create info flow",
+        description: "Information flows can only be created between steps that exist in the current state.",
+      });
+      return;
+    }
+
+    setNewFlowEdge({ sourceStepId, targetStepId });
+    setSelectedFlowForEdit(null);
+    setFlowPanelMode("create");
+  }, [selectedFutureState?.nodes, currentSteps, toast]);
+
+  const handleSelectFlow = useCallback((flowId: string | null) => {
+    if (!flowId) return;
+    const flow = informationFlows.find((f) => f.id === flowId);
+    if (flow) {
+      setSelectedFlowForEdit(flow);
+      setNewFlowEdge(null);
+      setFlowPanelMode("edit");
+    }
+  }, [informationFlows]);
+
+  const handleCreateFlow = async (input: CreateInformationFlowInput) => {
+    try {
+      await createFlow(input);
+      const flowsData = await getFlowsByProcess(processId);
+      setInformationFlows(flowsData);
+      toast({
+        title: "Flow created",
+        description: "Information flow has been added.",
+      });
+      handleCloseFlowPanel();
+    } catch (error) {
+      console.error("Failed to create flow:", error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to create information flow.",
+      });
+    }
+  };
+
+  const handleSaveFlow = async (flowId: string, updates: UpdateInformationFlowInput) => {
+    try {
+      await updateFlow(flowId, updates);
+      const flowsData = await getFlowsByProcess(processId);
+      setInformationFlows(flowsData);
+      toast({
+        title: "Flow updated",
+        description: "Information flow has been saved.",
+      });
+      handleCloseFlowPanel();
+    } catch (error) {
+      console.error("Failed to update flow:", error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to update information flow.",
+      });
+    }
+  };
+
+  const handleDeleteFlow = async (flowId: string) => {
+    try {
+      await deleteFlow(flowId);
+      const flowsData = await getFlowsByProcess(processId);
+      setInformationFlows(flowsData);
+      toast({
+        title: "Flow deleted",
+        description: "Information flow has been removed.",
+      });
+      handleCloseFlowPanel();
+    } catch (error) {
+      console.error("Failed to delete flow:", error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to delete information flow.",
+      });
+    }
+  };
+
+  const handleCloseFlowPanel = () => {
+    setFlowPanelMode(null);
+    setSelectedFlowForEdit(null);
+    setNewFlowEdge(null);
+  };
+
+  // Get step name helper for flow panel
+  const getStepName = useCallback((stepId: string): string => {
+    // First check current steps
+    const currentStep = currentSteps.find((s) => s.id === stepId);
+    if (currentStep) return currentStep.step_name;
+
+    // Then check future state nodes
+    const futureNode = selectedFutureState?.nodes.find((n) => n.id === stepId || n.source_step_id === stepId);
+    if (futureNode) return futureNode.name;
+
+    return "Unknown Step";
+  }, [currentSteps, selectedFutureState?.nodes]);
+
   // Handle updating a node (name, action, etc.) - memoized
   const handleUpdateNode = useCallback(async (nodeId: string, updates: { name?: string; action?: NodeAction }) => {
     try {
@@ -731,6 +928,7 @@ export function FutureStateDesigner({
         { label: "Modified", value: modifiedCount },
         { label: "Removed", value: removedCount },
         { label: "New Steps", value: newCount },
+        { label: "Info Flows", value: informationFlows.length },
       ]}
       actions={
         <div className="flex items-center gap-3">
@@ -917,6 +1115,7 @@ export function FutureStateDesigner({
                     currentSteps={currentSteps}
                     stepConnections={connections}
                     observations={observations}
+                    informationFlows={informationFlows}
                     getLinkedSolution={getLinkedSolution}
                     onNodeClick={handleOpenStepDesign}
                     highlightedNodeId={highlightedStepId}
@@ -928,6 +1127,9 @@ export function FutureStateDesigner({
                     onNodePositionChange={handleNodePositionChange}
                     onCreateEdge={handleCreateEdge}
                     onDeleteEdge={handleDeleteEdge}
+                    onSelectFlow={handleSelectFlow}
+                    onEdgeClickForNewFlow={handleEdgeClickForNewFlow}
+                    onDeleteFlow={handleDeleteFlow}
                   />
                 </div>
               </div>
@@ -1056,8 +1258,12 @@ export function FutureStateDesigner({
               <Card className="border-brand-gold/30">
                 <CardHeader className="pb-2 bg-brand-gold/5">
                   <CardTitle className="text-sm flex items-center gap-2 text-brand-navy">
-                    <Sparkles className="h-4 w-4 text-brand-gold" />
-                    {selectedFutureState.name}
+                    <Sparkles className="h-4 w-4 text-brand-gold flex-shrink-0" />
+                    <EditableTitle
+                      value={selectedFutureState.name}
+                      onSave={handleRenameFutureState}
+                      className="text-sm font-semibold"
+                    />
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4 overflow-x-auto">
@@ -1266,6 +1472,38 @@ export function FutureStateDesigner({
           )}
         </SheetContent>
       </Sheet>
+
+      {/* Flow Detail Panel */}
+      {flowPanelMode && (
+        <FlowDetailPanel
+          mode={flowPanelMode}
+          flow={selectedFlowForEdit}
+          sourceStepId={newFlowEdge?.sourceStepId}
+          targetStepId={newFlowEdge?.targetStepId}
+          processId={processId}
+          isOpen={flowPanelMode !== null}
+          onClose={handleCloseFlowPanel}
+          onCreate={handleCreateFlow}
+          onSave={handleSaveFlow}
+          onDelete={handleDeleteFlow}
+          wasteTypes={allWasteTypes}
+          observations={observations}
+          sourceStepName={
+            flowPanelMode === "create" && newFlowEdge
+              ? getStepName(newFlowEdge.sourceStepId)
+              : selectedFlowForEdit?.source_step_id
+              ? getStepName(selectedFlowForEdit.source_step_id)
+              : undefined
+          }
+          targetStepName={
+            flowPanelMode === "create" && newFlowEdge
+              ? getStepName(newFlowEdge.targetStepId)
+              : selectedFlowForEdit?.target_step_id
+              ? getStepName(selectedFlowForEdit.target_step_id)
+              : undefined
+          }
+        />
+      )}
     </StageLanding>
   );
 }

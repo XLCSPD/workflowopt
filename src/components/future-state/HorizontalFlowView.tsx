@@ -5,7 +5,6 @@ import ReactFlow, {
   Node,
   Edge,
   Background,
-  MiniMap,
   useNodesState,
   useEdgesState,
   ConnectionLineType,
@@ -16,6 +15,7 @@ import ReactFlow, {
   Handle,
   Position,
 } from "reactflow";
+import { CollapsibleMiniMap } from "@/components/workflow/CollapsibleMiniMap";
 import Dagre from "@dagrejs/dagre";
 import { motion, AnimatePresence } from "framer-motion";
 import { Badge } from "@/components/ui/badge";
@@ -39,6 +39,7 @@ import {
   Trash2,
   Copy,
   X,
+  Workflow,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type {
@@ -50,7 +51,13 @@ import type {
   StepDesignStatus,
   SolutionCard,
   NodeAction,
+  InformationFlowWithRelations,
+  FlowType,
 } from "@/types";
+import { FLOW_TYPE_CONFIG } from "@/types/informationFlow";
+import { FlowLegend } from "@/components/workflow/FlowLegend";
+import { FlowEdge } from "@/components/workflow/FlowEdge";
+import { DraggablePanel } from "@/components/ui/draggable-panel";
 import "reactflow/dist/style.css";
 import { STEP_TOOLBOX_MIME, ANNOTATION_TOOLBOX_MIME } from "./FutureStateToolbox";
 
@@ -64,6 +71,7 @@ interface HorizontalFlowViewProps {
   currentSteps: ProcessStep[];
   stepConnections: Array<{ source: string; target: string }>;
   observations: ObservationWithWasteTypes[];
+  informationFlows?: InformationFlowWithRelations[];
   onNodeClick: (nodeId: string) => void;
   highlightedNodeId?: string | null;
   getLinkedSolution?: (solutionId: string | null | undefined) => SolutionCard | null | undefined;
@@ -78,6 +86,10 @@ interface HorizontalFlowViewProps {
   onDuplicateNode?: (nodeId: string) => void;
   onCreateEdge?: (sourceId: string, targetId: string) => void;
   onDeleteEdge?: (edgeId: string) => void;
+  // Information flow props
+  onSelectFlow?: (flowId: string | null) => void;
+  onEdgeClickForNewFlow?: (sourceStepId: string, targetStepId: string) => void;
+  onDeleteFlow?: (flowId: string) => void;
 }
 
 interface FlowStepData {
@@ -336,12 +348,21 @@ const nodeTypes = {
 // MAIN COMPONENT
 // ============================================
 
+// Edge types for React Flow
+const edgeTypes = {
+  flowEdge: FlowEdge,
+};
+
+// Default visible flow types
+const DEFAULT_VISIBLE_FLOW_TYPES = new Set<FlowType>(["data", "document", "approval", "system", "notification"]);
+
 function HorizontalFlowViewInner({
   futureStateNodes,
   futureStateEdges,
   currentSteps,
   stepConnections,
   observations,
+  informationFlows = [],
   onNodeClick,
   highlightedNodeId,
   getLinkedSolution,
@@ -356,6 +377,10 @@ function HorizontalFlowViewInner({
   onDuplicateNode,
   onCreateEdge,
   onDeleteEdge,
+  // Information flow props
+  onSelectFlow,
+  onEdgeClickForNewFlow,
+  onDeleteFlow,
 }: HorizontalFlowViewProps) {
   console.log("[HorizontalFlowView] Rendering, futureStateNodes:", futureStateNodes.length);
   const [viewState, setViewState] = useState<"current" | "future">("future");
@@ -369,10 +394,25 @@ function HorizontalFlowViewInner({
     x: number;
     y: number;
   } | null>(null);
-  
+
+  // Context menu state for edge operations
+  const [edgeContextMenu, setEdgeContextMenu] = useState<{
+    edgeId: string;
+    sourceId: string;
+    targetId: string;
+    isInfoFlow: boolean;
+    flowId?: string;
+    x: number;
+    y: number;
+  } | null>(null);
+
   // Editing state for inline rename
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState("");
+
+  // Information flow state
+  const [showFlows, setShowFlows] = useState(false);
+  const [visibleFlowTypes, setVisibleFlowTypes] = useState<Set<FlowType>>(DEFAULT_VISIBLE_FLOW_TYPES);
 
   // Track if we've initialized the nodes to prevent infinite loops
   const prevDataSignatureRef = useRef<string>("");
@@ -426,6 +466,109 @@ function HorizontalFlowViewInner({
     const stepObs = observationsByStep.get(stepId) || [];
     return stepObs.reduce((sum, obs) => sum + (obs.priority_score || 0), 0);
   }, [observationsByStep]);
+
+  // Information flow handlers
+  const handleToggleFlowType = useCallback((type: FlowType) => {
+    setVisibleFlowTypes((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(type)) {
+        newSet.delete(type);
+      } else {
+        newSet.add(type);
+      }
+      return newSet;
+    });
+  }, []);
+
+  const handleToggleAllFlowTypes = useCallback((visible: boolean) => {
+    if (visible) {
+      setVisibleFlowTypes(new Set<FlowType>(["data", "document", "approval", "system", "notification"]));
+    } else {
+      setVisibleFlowTypes(new Set<FlowType>());
+    }
+  }, []);
+
+  // Calculate flow counts by type
+  const flowCounts = useMemo(() => {
+    const counts: Record<FlowType, number> = {
+      data: 0,
+      document: 0,
+      approval: 0,
+      system: 0,
+      notification: 0,
+    };
+    informationFlows.forEach((flow) => {
+      if (flow.flow_type in counts) {
+        counts[flow.flow_type as FlowType]++;
+      }
+    });
+    return counts;
+  }, [informationFlows]);
+
+  // Create information flow edges
+  const infoFlowEdges = useMemo(() => {
+    if (!showFlows || informationFlows.length === 0) return [];
+
+    // Build a map of source step IDs to node IDs
+    // In future state, we need to map original step IDs to future state node IDs
+    const stepIdToNodeId = new Map<string, string>();
+
+    // Map current steps
+    currentSteps.forEach((step) => {
+      stepIdToNodeId.set(step.id, step.id);
+    });
+
+    // Map future state nodes (use source_step_id to map back)
+    futureStateNodes.forEach((node) => {
+      if (node.source_step_id) {
+        stepIdToNodeId.set(node.source_step_id, node.id);
+      }
+      stepIdToNodeId.set(node.id, node.id);
+    });
+
+    // Get current node IDs from the nodes array
+    const currentNodeIds = new Set(nodes.map(n => n.id));
+
+    return informationFlows
+      .filter((flow) => {
+        // Filter by flow type and ensure source/target exist
+        if (!visibleFlowTypes.has(flow.flow_type as FlowType)) return false;
+        if (!flow.source_step_id || !flow.target_step_id) return false;
+
+        // Ensure both nodes exist in current view
+        const sourceNodeId = stepIdToNodeId.get(flow.source_step_id) || flow.source_step_id;
+        const targetNodeId = stepIdToNodeId.get(flow.target_step_id) || flow.target_step_id;
+        return currentNodeIds.has(sourceNodeId) && currentNodeIds.has(targetNodeId);
+      })
+      .map((flow) => {
+        const sourceNodeId = stepIdToNodeId.get(flow.source_step_id!) || flow.source_step_id!;
+        const targetNodeId = stepIdToNodeId.get(flow.target_step_id!) || flow.target_step_id!;
+        const config = FLOW_TYPE_CONFIG[flow.flow_type as FlowType];
+
+        return {
+          id: `flow-${flow.id}`,
+          source: sourceNodeId,
+          target: targetNodeId,
+          type: "flowEdge",
+          animated: true,
+          data: {
+            flow: flow, // Pass full flow object for FlowEdge component
+            showLabel: true,
+            highlightWaste: true,
+          },
+          style: {
+            stroke: config?.color || "#64748b",
+            strokeWidth: 2,
+          },
+          markerEnd: {
+            type: MarkerType.ArrowClosed,
+            color: config?.color || "#64748b",
+            width: 16,
+            height: 16,
+          },
+        };
+      });
+  }, [showFlows, informationFlows, visibleFlowTypes, currentSteps, futureStateNodes, nodes]);
 
   const { fitView, zoomIn, zoomOut, screenToFlowPosition } = useReactFlow();
   
@@ -715,9 +858,13 @@ function HorizontalFlowViewInner({
     [isEditMode]
   );
 
-  // Close context menu
+  // Close context menus
   const closeContextMenu = useCallback(() => {
     setContextMenu(null);
+  }, []);
+
+  const closeEdgeContextMenu = useCallback(() => {
+    setEdgeContextMenu(null);
   }, []);
 
   // Handle rename from context menu
@@ -762,6 +909,39 @@ function HorizontalFlowViewInner({
     closeContextMenu();
   }, [contextMenu, onDuplicateNode, closeContextMenu]);
 
+  // Edge context menu handlers
+  const handleEdgeAddInfoFlow = useCallback(() => {
+    if (edgeContextMenu && onEdgeClickForNewFlow) {
+      onEdgeClickForNewFlow(edgeContextMenu.sourceId, edgeContextMenu.targetId);
+    }
+    closeEdgeContextMenu();
+  }, [edgeContextMenu, onEdgeClickForNewFlow, closeEdgeContextMenu]);
+
+  const handleEdgeEditInfoFlow = useCallback(() => {
+    if (edgeContextMenu && edgeContextMenu.flowId && onSelectFlow) {
+      onSelectFlow(edgeContextMenu.flowId);
+    }
+    closeEdgeContextMenu();
+  }, [edgeContextMenu, onSelectFlow, closeEdgeContextMenu]);
+
+  const handleEdgeDeleteConnection = useCallback(() => {
+    if (edgeContextMenu && onDeleteEdge) {
+      if (window.confirm("Delete this connection?")) {
+        onDeleteEdge(edgeContextMenu.edgeId);
+      }
+    }
+    closeEdgeContextMenu();
+  }, [edgeContextMenu, onDeleteEdge, closeEdgeContextMenu]);
+
+  const handleEdgeDeleteInfoFlow = useCallback(() => {
+    if (edgeContextMenu && edgeContextMenu.flowId && onDeleteFlow) {
+      if (window.confirm("Delete this information flow?")) {
+        onDeleteFlow(edgeContextMenu.flowId);
+      }
+    }
+    closeEdgeContextMenu();
+  }, [edgeContextMenu, onDeleteFlow, closeEdgeContextMenu]);
+
   // Keyboard event handler for Delete key
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -786,13 +966,14 @@ function HorizontalFlowViewInner({
       
       if (event.key === "Escape") {
         closeContextMenu();
+        closeEdgeContextMenu();
         handleCancelRename();
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isEditMode, nodes, onDeleteNode, closeContextMenu, handleCancelRename]);
+  }, [isEditMode, nodes, onDeleteNode, closeContextMenu, closeEdgeContextMenu, handleCancelRename]);
 
   // Close context menu when clicking outside
   useEffect(() => {
@@ -810,6 +991,22 @@ function HorizontalFlowViewInner({
       return () => window.removeEventListener("click", handleClickOutside);
     }
   }, [contextMenu, closeContextMenu]);
+
+  // Close edge context menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = () => {
+      if (edgeContextMenu) {
+        closeEdgeContextMenu();
+      }
+    };
+
+    if (edgeContextMenu) {
+      setTimeout(() => {
+        window.addEventListener("click", handleClickOutside);
+      }, 0);
+      return () => window.removeEventListener("click", handleClickOutside);
+    }
+  }, [edgeContextMenu, closeEdgeContextMenu]);
 
   // Auto-layout handler for manual triggering
   const handleAutoLayout = useCallback(() => {
@@ -1021,6 +1218,25 @@ function HorizontalFlowViewInner({
                 <Maximize2 className="h-4 w-4" />
               </Button>
             </div>
+
+            {/* Info Flows Toggle - show when there are flows */}
+            {informationFlows.length > 0 && (
+              <Button
+                variant={showFlows ? "default" : "outline"}
+                size="sm"
+                onClick={() => setShowFlows(!showFlows)}
+                className={cn(
+                  "h-9 shadow-sm gap-2",
+                  showFlows ? "bg-blue-600 hover:bg-blue-700 text-white" : "bg-white"
+                )}
+              >
+                <Workflow className="h-4 w-4" />
+                Info Flows
+                <Badge variant={showFlows ? "outline" : "secondary"} className={cn("text-xs", showFlows && "border-blue-300 text-blue-100")}>
+                  {informationFlows.length}
+                </Badge>
+              </Button>
+            )}
           </div>
 
           {/* Dual Legend: Priority + Action */}
@@ -1071,7 +1287,8 @@ function HorizontalFlowViewInner({
       >
         <ReactFlow
           nodes={nodes}
-          edges={edges}
+          edges={[...edges, ...infoFlowEdges]}
+          edgeTypes={edgeTypes}
           onNodesChange={(changes) => {
             onNodesChange(changes);
             // Track position changes for edit mode
@@ -1097,16 +1314,29 @@ function HorizontalFlowViewInner({
             }
           }}
           onEdgeClick={(event, edge) => {
-            if (isEditMode && onDeleteEdge) {
-              event.stopPropagation();
-              // Could show confirmation or directly delete
-              if (window.confirm("Delete this connection?")) {
-                onDeleteEdge(edge.id);
-              }
-            }
+            event.stopPropagation();
+
+            // Check if this is an information flow edge
+            const isInfoFlow = edge.id.startsWith("flow-");
+            const flowId = isInfoFlow ? edge.id.replace("flow-", "") : undefined;
+
+            // Show context menu for edge actions
+            setEdgeContextMenu({
+              edgeId: edge.id,
+              sourceId: edge.source,
+              targetId: edge.target,
+              isInfoFlow,
+              flowId,
+              x: event.clientX,
+              y: event.clientY,
+            });
           }}
           onNodeContextMenu={handleNodeContextMenu}
           onPaneClick={(event) => {
+            // Close any open context menus
+            setContextMenu(null);
+            setEdgeContextMenu(null);
+
             // Double-click to create node in edit mode
             if (isEditMode && onCreateNode && event.detail === 2) {
               const reactFlowBounds = containerRef.current?.getBoundingClientRect();
@@ -1138,7 +1368,7 @@ function HorizontalFlowViewInner({
           selectNodesOnDrag={false}
         >
           <Background color="#e2e8f0" gap={20} size={1} />
-          <MiniMap
+          <CollapsibleMiniMap
             nodeColor={(node) => {
               const action = (node.data as FlowStepData).action;
               switch (action) {
@@ -1149,9 +1379,24 @@ function HorizontalFlowViewInner({
               }
             }}
             maskColor="rgba(255, 255, 255, 0.8)"
-            position="bottom-right"
-            className="!bg-white !border !shadow-lg !rounded-lg !right-2 !bottom-2"
           />
+
+          {/* Information Flow Legend */}
+          {showFlows && (
+            <DraggablePanel
+              id="future-state-flow-legend"
+              defaultPosition={{ x: 20, y: 20 }}
+              anchor="bottom-left"
+              className="bg-white rounded-b-lg"
+            >
+              <FlowLegend
+                visibleTypes={visibleFlowTypes}
+                onToggleType={handleToggleFlowType}
+                onToggleAll={handleToggleAllFlowTypes}
+                flowCounts={flowCounts}
+              />
+            </DraggablePanel>
+          )}
         </ReactFlow>
       </div>
 
@@ -1191,6 +1436,76 @@ function HorizontalFlowViewInner({
               <Trash2 className="w-4 h-4" />
               Delete
             </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Context Menu for Edges */}
+      <AnimatePresence>
+        {edgeContextMenu && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            transition={{ duration: 0.1 }}
+            className="fixed z-50 bg-white rounded-lg shadow-lg border border-slate-200 py-1 min-w-[180px]"
+            style={{ left: edgeContextMenu.x, top: edgeContextMenu.y }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {edgeContextMenu.isInfoFlow ? (
+              <>
+                {/* Info Flow Edge Options */}
+                <button
+                  className="w-full px-3 py-2 text-left text-sm hover:bg-slate-100 flex items-center gap-2"
+                  onClick={handleEdgeEditInfoFlow}
+                >
+                  <Pencil className="w-4 h-4 text-slate-500" />
+                  Edit Info Flow
+                </button>
+                {onDeleteFlow && (
+                  <>
+                    <div className="border-t border-slate-200 my-1" />
+                    <button
+                      className="w-full px-3 py-2 text-left text-sm hover:bg-red-50 text-red-600 flex items-center gap-2"
+                      onClick={handleEdgeDeleteInfoFlow}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      Delete Info Flow
+                    </button>
+                  </>
+                )}
+              </>
+            ) : (
+              <>
+                {/* Regular Edge Options */}
+                {onEdgeClickForNewFlow && (
+                  <button
+                    className="w-full px-3 py-2 text-left text-sm hover:bg-slate-100 flex items-center gap-2"
+                    onClick={handleEdgeAddInfoFlow}
+                  >
+                    <Workflow className="w-4 h-4 text-blue-500" />
+                    Add Info Flow
+                  </button>
+                )}
+                {isEditMode && onDeleteEdge && (
+                  <>
+                    {onEdgeClickForNewFlow && <div className="border-t border-slate-200 my-1" />}
+                    <button
+                      className="w-full px-3 py-2 text-left text-sm hover:bg-red-50 text-red-600 flex items-center gap-2"
+                      onClick={handleEdgeDeleteConnection}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      Delete Connection
+                    </button>
+                  </>
+                )}
+                {!onEdgeClickForNewFlow && !isEditMode && (
+                  <div className="px-3 py-2 text-sm text-slate-400">
+                    No actions available
+                  </div>
+                )}
+              </>
+            )}
           </motion.div>
         )}
       </AnimatePresence>

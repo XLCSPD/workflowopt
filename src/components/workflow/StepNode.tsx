@@ -95,7 +95,10 @@ function StepNodeComponent({ data }: NodeProps<StepNodeData>) {
       />
 
       <div
-        onClick={onClick}
+        onClick={() => {
+          console.log("StepNode clicked:", step.step_name, "onClick exists:", !!onClick);
+          onClick?.();
+        }}
         className={cn(
           "relative px-4 py-3 rounded-lg shadow-step-node cursor-pointer transition-all duration-200",
           "min-w-[160px] max-w-[200px]",
