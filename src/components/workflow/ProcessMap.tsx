@@ -45,6 +45,8 @@ const edgeTypes = {
 // Stable defaults to avoid creating new objects on each render (which causes infinite loops)
 const DEFAULT_VISIBLE_FLOW_TYPES = new Set<FlowType>(["data", "document", "approval", "system", "notification"]);
 const DEFAULT_INFORMATION_FLOWS: InformationFlowWithRelations[] = [];
+const DEFAULT_OBSERVATIONS: Record<string, { count: number; priorityScore: number }> = {};
+const DEFAULT_SELECTED_STEP_IDS: string[] = [];
 
 interface ProcessMapProps {
   workflowId: string;
@@ -187,9 +189,9 @@ function ProcessMapInner({
   laneStyles,
   steps,
   connections,
-  observations = {},
+  observations = DEFAULT_OBSERVATIONS,
   selectedStepId,
-  selectedStepIds = [],
+  selectedStepIds = DEFAULT_SELECTED_STEP_IDS,
   onStepClick,
   onSelectStep,
   onSelectSteps,

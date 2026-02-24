@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import React, { useState, useCallback, useRef, useMemo, Suspense, lazy } from "react";
 import { useRouter } from "next/navigation";
 import {
   Dialog,
@@ -36,8 +36,55 @@ import {
   importWorkflow,
   type WorkflowImportData,
 } from "@/lib/services/workflowImport";
-import { ProcessMap } from "@/components/workflow/ProcessMap";
 import type { ProcessStep } from "@/types";
+
+// Lazy-load ProcessMap to avoid loading ReactFlow/Dagre unless the preview step is reached
+const ProcessMap = lazy(() =>
+  import("@/components/workflow/ProcessMap").then((mod) => ({
+    default: mod.ProcessMap,
+  }))
+);
+
+// Error boundary to catch ProcessMap rendering errors without crashing the whole page
+class PreviewErrorBoundary extends React.Component<
+  { children: React.ReactNode; onError?: (error: Error) => void },
+  { hasError: boolean; error: Error | null }
+> {
+  constructor(props: { children: React.ReactNode; onError?: (error: Error) => void }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error) {
+    console.error("[ImageImport] Preview render error:", error);
+    this.props.onError?.(error);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex flex-col items-center justify-center h-full p-6 text-center">
+          <AlertTriangle className="h-8 w-8 text-destructive mb-3" />
+          <p className="text-sm font-medium mb-1">Preview failed to render</p>
+          <p className="text-xs text-muted-foreground mb-3">
+            {this.state.error?.message || "An unexpected error occurred"}
+          </p>
+          <button
+            className="text-xs text-brand-gold underline"
+            onClick={() => this.setState({ hasError: false, error: null })}
+          >
+            Try again
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 // ============================================
 // TYPES
@@ -344,6 +391,13 @@ export function WorkflowImageImportDialog({
         if (newImages.length > 0) {
           setUploadedImages((prev) => [...prev, ...newImages]);
         }
+      } catch (err) {
+        console.error("[ImageImport] File processing error:", err);
+        toast({
+          title: "File processing error",
+          description: "An error occurred while processing your file. Please try again.",
+          variant: "destructive",
+        });
       } finally {
         setIsLoadingFiles(false);
       }
@@ -506,12 +560,21 @@ export function WorkflowImageImportDialog({
   ]);
 
   // ============================================
-  // Preview data
+  // Preview data (wrapped in try-catch to avoid page crash on bad AI data)
   // ============================================
 
-  const previewProps = analysisResult?.data
-    ? importDataToPreviewProps(analysisResult.data)
-    : null;
+  const { previewProps, previewError } = useMemo(() => {
+    if (!analysisResult?.data) return { previewProps: null, previewError: null };
+    try {
+      return { previewProps: importDataToPreviewProps(analysisResult.data), previewError: null };
+    } catch (err) {
+      console.error("[ImageImport] Failed to generate preview:", err);
+      return {
+        previewProps: null,
+        previewError: err instanceof Error ? err.message : "Failed to generate workflow preview",
+      };
+    }
+  }, [analysisResult?.data]);
 
   // ============================================
   // RENDER
@@ -674,8 +737,23 @@ export function WorkflowImageImportDialog({
           </div>
         )}
 
+        {/* Step 3: Preview - data error */}
+        {currentStep === "preview" && analysisResult && previewError && (
+          <div className="flex-1 space-y-4 py-4">
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertTitle>Preview generation failed</AlertTitle>
+              <AlertDescription>{previewError}</AlertDescription>
+            </Alert>
+            <p className="text-sm text-muted-foreground">
+              The AI analysis completed but the workflow data could not be
+              visualized. You can go back and try again with a clearer image.
+            </p>
+          </div>
+        )}
+
         {/* Step 3: Preview */}
-        {currentStep === "preview" && analysisResult && previewProps && (
+        {currentStep === "preview" && analysisResult && previewProps && !previewError && (
           <div className="flex-1 flex flex-col gap-4 overflow-hidden">
             {/* Split pane */}
             <div className="flex-1 grid grid-cols-5 gap-4 min-h-0">
@@ -713,13 +791,23 @@ export function WorkflowImageImportDialog({
                   Detected Workflow
                 </Label>
                 <div className="flex-1 rounded-lg border bg-white overflow-hidden min-h-[300px]">
-                  <ProcessMap
-                    workflowId="image-import-preview"
-                    steps={previewProps.steps}
-                    connections={previewProps.connections}
-                    lanes={previewProps.lanes}
-                    isEditMode={false}
-                  />
+                  <PreviewErrorBoundary>
+                    <Suspense
+                      fallback={
+                        <div className="flex items-center justify-center h-full">
+                          <Loader2 className="h-6 w-6 animate-spin text-brand-gold" />
+                        </div>
+                      }
+                    >
+                      <ProcessMap
+                        workflowId="image-import-preview"
+                        steps={previewProps.steps}
+                        connections={previewProps.connections}
+                        lanes={previewProps.lanes}
+                        isEditMode={false}
+                      />
+                    </Suspense>
+                  </PreviewErrorBoundary>
                 </div>
               </div>
             </div>
@@ -852,14 +940,24 @@ export function WorkflowImageImportDialog({
               >
                 Back
               </Button>
-              <Button
-                onClick={handleImport}
-                disabled={isImporting || !workflowName.trim()}
-                className="bg-brand-gold hover:bg-brand-gold/90 text-brand-navy"
-              >
-                <CheckCircle className="mr-2 h-4 w-4" />
-                Import Workflow
-              </Button>
+              {!previewError && (
+                <Button
+                  onClick={handleImport}
+                  disabled={isImporting || !workflowName.trim()}
+                  className="bg-brand-gold hover:bg-brand-gold/90 text-brand-navy"
+                >
+                  <CheckCircle className="mr-2 h-4 w-4" />
+                  Import Workflow
+                </Button>
+              )}
+              {previewError && (
+                <Button
+                  onClick={handleAnalyze}
+                  className="bg-brand-gold hover:bg-brand-gold/90 text-brand-navy"
+                >
+                  Retry Analysis
+                </Button>
+              )}
             </>
           )}
         </DialogFooter>
