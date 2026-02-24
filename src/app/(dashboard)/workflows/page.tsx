@@ -42,6 +42,7 @@ import {
   ArrowRight,
   Loader2,
   Upload,
+  ImagePlus,
   LayoutGrid,
   List,
   ArrowUpDown,
@@ -54,6 +55,7 @@ import {
   deleteProcess,
 } from "@/lib/services/workflows";
 import { WorkflowImportDialog } from "@/components/workflow/WorkflowImportDialog";
+import { WorkflowImageImportDialog } from "@/components/workflow/WorkflowImageImportDialog";
 import { CopyWorkflowDialog } from "@/components/workflow/CopyWorkflowDialog";
 import type { Process } from "@/types";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -94,6 +96,7 @@ export default function WorkflowsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
+  const [isImageImportDialogOpen, setIsImageImportDialogOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [newWorkflow, setNewWorkflow] = useState({ name: "", description: "" });
 
@@ -276,6 +279,13 @@ export default function WorkflowsPage() {
               <Upload className="mr-2 h-4 w-4" />
               Import
             </Button>
+            <Button
+              variant="outline"
+              onClick={() => setIsImageImportDialogOpen(true)}
+            >
+              <ImagePlus className="mr-2 h-4 w-4" />
+              Import from Image
+            </Button>
             <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
               <DialogTrigger asChild>
                 <Button className="bg-brand-gold hover:bg-brand-gold/90 text-brand-navy">
@@ -350,6 +360,13 @@ export default function WorkflowsPage() {
       <WorkflowImportDialog
         open={isImportDialogOpen}
         onOpenChange={setIsImportDialogOpen}
+        onSuccess={handleImportSuccess}
+      />
+
+      {/* Image Import Dialog */}
+      <WorkflowImageImportDialog
+        open={isImageImportDialogOpen}
+        onOpenChange={setIsImageImportDialogOpen}
         onSuccess={handleImportSuccess}
       />
 

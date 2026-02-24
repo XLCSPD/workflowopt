@@ -4,114 +4,105 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Development Commands
 
+All commands run from the `process-optimization-app/` directory.
+
 ```bash
-# Start development server
-npm run dev
-
-# Build for production
-npm run build
-
-# Lint code
-npm run lint
-
-# Run unit tests (Vitest)
-npm run test
-
-# Run single test file
-npm run test -- src/lib/services/__tests__/workflows.test.ts
-
-# Run tests in watch mode
-npm run test -- --watch
-
-# Run E2E tests (Playwright)
-npm run test:e2e
-
-# Run E2E tests with UI
-npm run test:e2e:ui
-
-# Test coverage
-npm run test:coverage
+npm run dev              # Start dev server (port 3000)
+npm run build            # Production build (standalone output)
+npm run lint             # ESLint on src/
+npm run test             # Vitest unit tests
+npm run test -- src/lib/services/__tests__/workflows.test.ts  # Single test file
+npm run test -- --watch  # Watch mode
+npm run test:coverage    # Coverage report
+npm run test:e2e         # Playwright E2E tests
+npm run test:e2e:ui      # Playwright with UI
 ```
 
 ## Architecture
 
 ### Tech Stack
-- **Framework**: Next.js 14 with App Router, React 18, TypeScript
-- **Styling**: Tailwind CSS with Shadcn/UI components
-- **Backend**: Supabase (Auth, PostgreSQL, Realtime)
-- **State**: Zustand stores for client-side state
+- **Framework**: Next.js 14 (App Router), React 18, TypeScript (strict mode)
+- **Styling**: Tailwind CSS + Shadcn/UI (Radix UI primitives)
+- **Backend**: Supabase (Auth, PostgreSQL with RLS, Realtime, Storage)
+- **State**: Zustand stores (`lib/stores/`) for client-side state
 - **Visualization**: React Flow for workflow diagrams, Recharts for analytics
-- **Forms**: React Hook Form with Zod validation
+- **Forms**: React Hook Form + Zod validation
+- **Exports**: pptxgenjs (PowerPoint), jsPDF (PDF)
 
-### Directory Structure
+### Path Alias
+`@/*` maps to `./src/*` (configured in tsconfig.json and vitest.config.ts).
 
-```
-src/
-├── app/
-│   ├── (auth)/           # Authentication pages (login, register, etc.)
-│   ├── (dashboard)/      # Protected pages requiring authentication
-│   └── api/              # API route handlers
-├── components/
-│   ├── ui/               # Shadcn/UI components (don't modify directly)
-│   ├── workflow/         # Workflow editor components
-│   └── waste/            # Waste tagging components
-├── lib/
-│   ├── services/         # Supabase data access functions
-│   ├── stores/           # Zustand state stores
-│   ├── supabase/         # Supabase client configuration
-│   └── pwa/              # PWA offline support utilities
-└── types/                # TypeScript type definitions
-```
+### Route Groups
+- `(auth)` — Minimal layout for login/register/password-reset pages
+- `(dashboard)` — Full layout with sidebar, requires authentication
 
-### Key Patterns
+### Service Layer
+All database operations go through `lib/services/` functions. These wrap Supabase client calls and throw on errors. API routes and components consume these services — never call Supabase directly from components.
 
-**Service Layer**: All database operations go through service functions in `lib/services/`. These wrap Supabase client calls and handle error throwing.
+### Supabase Clients
+- `lib/supabase/client.ts` — Browser client (client components)
+- `lib/supabase/server.ts` — Server client (server components, API routes)
+- `lib/supabase/admin.ts` — Service role client (admin operations only)
+- `lib/supabase/middleware.ts` — Session refresh middleware
 
-**State Management**: Zustand stores in `lib/stores/` manage client-side state:
-- `authStore` - User authentication state
-- `sessionStore` - Active waste walk session
-- `workflowStore` - Workflow editor state
-- `trainingStore` - Training progress
+### Zustand Stores
+- `authStore` — User auth state (persisted to localStorage)
+- `sessionStore` — Active waste walk session
+- `workflowStore` — Workflow editor state
+- `trainingStore` — Training progress
 
-**Route Groups**: The App Router uses groups to apply different layouts:
-- `(auth)` - Minimal layout for authentication flows
-- `(dashboard)` - Full layout with sidebar navigation
+### Components
+- `components/ui/` — Shadcn/UI primitives. **Do not modify directly**; regenerate via Shadcn CLI.
+- `components/workflow/` — React Flow-based workflow editor (ProcessMap, FlowNode, SwimlaneManager, etc.)
+- `components/future-state/` — Future State Design Studio components (25+ files)
+- `components/waste/` — Waste tagging, observation forms, cheat sheet
+- `components/layout/` — Sidebar, header, navigation
 
-**Supabase Clients**:
-- `lib/supabase/client.ts` - Browser client for client components
-- `lib/supabase/server.ts` - Server client for server components/API routes
-- `lib/supabase/admin.ts` - Admin client with service role key
+### API Routes (23 endpoints)
+Major groups:
+- `/api/workflows/[id]/context/` — Workflow context CRUD and AI generation
+- `/api/future-state/` — Studio agents: synthesis, solutions, sequencing, design, step-design, nodes/edges/lanes/versions/annotations
+- `/api/export/pptx` — PowerPoint report export
+- `/api/observations/sync` — Offline observation sync
+- `/api/insights/generate` — AI-powered insights
+- `/api/users/invite` — User invitation flow
+- `/api/admin/` — Admin user/org management
+- `/api/health` — Health check
+
+Rate limiting (`lib/rate-limit.ts`) is applied to expensive endpoints (invites, AI, exports, sync).
 
 ### Database
 
-Schema defined in `supabase/schema.sql`. Key tables:
-- `processes` - Workflow definitions
-- `process_steps` - Individual workflow steps with positions
-- `sessions` - Waste walk sessions
-- `observations` - Tagged waste observations with scoring
-- `waste_types` - DOWNTIME + digital waste definitions
+Schema in `supabase/schema.sql`, migrations in `supabase/migrations/`.
 
-Uses Row Level Security (RLS) for multi-tenant data isolation. Helper functions `get_user_org_id()` and `get_user_role()` determine access.
+**Core tables**: `organizations`, `users`, `processes` (workflows), `process_steps`, `step_connections`, `sessions`, `observations`, `observation_waste_links`, `waste_types`, `training_content`, `training_progress`, `notifications`, `session_insights`
 
-### Styling
+**Workflow context tables**: `workflow_contexts`, `workflow_stakeholders`, `workflow_systems`, `workflow_metrics`
 
-Brand colors in `tailwind.config.ts`:
-- `brand-gold` (#FFC000) - Primary accent
-- `brand-navy` (#102A43) - Primary dark
-- `brand-emerald` (#219653) - Success states
-- `brand-charcoal` (#545454) - Text
-- `brand-platinum` (#F0F4F8) - Backgrounds
+**Future State Studio tables**: `insight_themes`, `solution_cards`, `implementation_waves`, `future_states`, `future_state_nodes`, `future_state_edges`, `step_contexts`, `step_design_versions`, `step_design_options`, `design_assumptions`, `information_flows`, `step_attachments`
+
+RLS enforces multi-tenant isolation via `get_user_org_id()` and `get_user_role()` helper functions. When adding tables, always include RLS policies.
 
 ### User Roles
+- **admin** — Full access, user management, org settings
+- **facilitator** — Create/manage sessions and workflows, view analytics
+- **participant** — Join sessions, tag waste, complete training
 
-- **admin** - Full access, user management, organization settings
-- **facilitator** - Create/manage sessions and workflows, view analytics
-- **participant** - Join sessions, tag waste, complete training
+### Brand Colors (tailwind.config.ts)
+- `brand-navy` (#102A43) — Primary dark
+- `brand-gold` (#FFC000) — Primary accent
+- `brand-emerald` (#219653) — Success
+- `brand-charcoal` (#545454) — Text
+- `brand-platinum` (#F0F4F8) — Backgrounds
 
-## Testing
+## Conventions
 
-Unit tests are in `src/lib/services/__tests__/` using Vitest with jsdom.
-E2E tests are in `e2e/` using Playwright.
+- Use `"use client"` directive for client components
+- Follow conventional commits: `feat(scope):`, `fix(scope):`, `docs(scope):`, etc.
+- Branch naming: `feature/`, `fix/`, `docs/`, `refactor/`, `test/`
+- Prefer interfaces over type aliases for object shapes
+- Types live in `src/types/` (main definitions in `index.ts`, ~1200 lines)
+- Database schema changes: update `supabase/schema.sql` and add a migration file in `supabase/migrations/`
 
 ## Environment Variables
 
@@ -123,8 +114,15 @@ SUPABASE_SERVICE_ROLE_KEY
 NEXT_PUBLIC_APP_URL
 ```
 
-Optional for AI features:
+Optional (AI features):
 ```
 OPENAI_API_KEY
 ANTHROPIC_API_KEY
 ```
+
+## Testing
+
+- Unit tests: `src/lib/services/__tests__/` using Vitest with jsdom
+- E2E tests: `e2e/` using Playwright
+- Test setup: `src/test/setup.ts`
+- Coverage excludes: `node_modules/`, `src/test/`, `*.d.ts`, `*.config.*`, `types/`

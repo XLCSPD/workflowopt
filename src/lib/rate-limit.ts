@@ -169,6 +169,13 @@ export const syncRateLimit = {
   identifier: "sync",
 };
 
+/** Rate limit for vision-based image import: 10 per hour */
+export const visionImportRateLimit = {
+  limit: 10,
+  interval: 3600000, // 1 hour
+  identifier: "vision-import",
+};
+
 /** General API rate limit: 100 per minute */
 export const generalRateLimit = {
   limit: 100,
