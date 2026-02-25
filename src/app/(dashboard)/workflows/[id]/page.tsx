@@ -70,6 +70,7 @@ import {
   renameLane,
   reorderLanes,
   updateLaneColor,
+  updateLaneHeight,
   deleteProcess,
   updateStepPositions,
 } from "@/lib/services/workflowEditor";
@@ -93,6 +94,7 @@ interface ConnectionData {
   id?: string;
   source: string;
   target: string;
+  label?: string;
 }
 
 interface WorkflowSnapshot {
@@ -303,6 +305,7 @@ export default function WorkflowDetailPage() {
             id: c.id,
             source: c.source_step_id,
             target: c.target_step_id,
+            label: c.label,
           }))
         );
 
@@ -617,6 +620,19 @@ export default function WorkflowDetailPage() {
       }
     },
     [workflow, isSaving, toast]
+  );
+
+  const handleLaneHeightChange = useCallback(
+    async (laneId: string, height: number | null) => {
+      if (!workflow) return;
+      try {
+        const updated = await updateLaneHeight(workflow.id, laneId, height);
+        setLanes((prev) => prev.map((l) => (l.id === updated.id ? updated : l)));
+      } catch (error) {
+        console.error("Failed to update lane height:", error);
+      }
+    },
+    [workflow]
   );
 
   const handleClosePanel = useCallback(() => {
@@ -1676,6 +1692,7 @@ export default function WorkflowDetailPage() {
           <ProcessMap
             workflowId={params.id as string}
             lanes={laneNames}
+            laneData={lanes}
             laneStyles={laneStyles}
             steps={steps}
             connections={connections}
@@ -1706,6 +1723,7 @@ export default function WorkflowDetailPage() {
             informationFlows={informationFlows}
             onSelectFlow={handleSelectFlow}
             onEdgeClickForNewFlow={handleEdgeClickForNewFlow}
+            onLaneHeightChange={handleLaneHeightChange}
           />
 
           {steps.length === 0 && (

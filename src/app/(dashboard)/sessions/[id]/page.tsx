@@ -92,7 +92,7 @@ export default function SessionDetailPage() {
   // Data state
   const [session, setSession] = useState<Session | null>(null);
   const [steps, setSteps] = useState<ProcessStep[]>([]);
-  const [connections, setConnections] = useState<{ source: string; target: string }[]>([]);
+  const [connections, setConnections] = useState<{ source: string; target: string; label?: string }[]>([]);
   const [participants, setParticipants] = useState<SessionParticipantWithUser[]>([]);
   const [observations, setObservations] = useState<ObservationWithDetails[]>([]);
   const [wasteTypes, setWasteTypes] = useState<WasteType[]>([]);
@@ -220,6 +220,7 @@ export default function SessionDetailPage() {
             workflowConnections.map((c: StepConnection) => ({
               source: c.source_step_id,
               target: c.target_step_id,
+              label: c.label,
             }))
           );
         }

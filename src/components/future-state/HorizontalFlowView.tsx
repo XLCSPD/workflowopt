@@ -42,6 +42,14 @@ import {
   Workflow,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  type LaneLayout,
+  HORIZONTAL_FLOW_CONFIG,
+  buildColumnAssignments,
+  computeLaneLayouts,
+  getNodeYInLane,
+  getLaneIndexForY,
+} from "@/lib/layout/swimlaneLayout";
 import type {
   FutureStateNode,
   FutureStateEdge,
@@ -121,11 +129,9 @@ const getPriorityColor = (priority: number) => {
 // CONSTANTS
 // ============================================
 
-const LANE_HEIGHT = 140;
 const NODE_WIDTH = 220;
 const NODE_HEIGHT = 110;
 const NODE_GAP_X = 60;
-const LANE_GAP = 10;
 
 // Swimlane background colors matching the mockup
 const SWIMLANE_COLORS = [
@@ -182,20 +188,20 @@ const designStatusConfig: Record<StepDesignStatus, { icon: typeof CheckCircle2; 
 function getLayoutedElements(
   nodes: Node[],
   edges: Edge[],
-  laneList: string[]
-): { nodes: Node[]; edges: Edge[] } {
+  laneList: string[],
+  customHeights: Map<string, number | null>
+): { nodes: Node[]; edges: Edge[]; laneLayouts: LaneLayout[] } {
   const g = new Dagre.graphlib.Graph().setDefaultEdgeLabel(() => ({}));
-  g.setGraph({ 
-    rankdir: "LR",      // Left to Right flow
-    nodesep: 50,        // Horizontal spacing between nodes in same rank
-    ranksep: 80,        // Spacing between ranks (columns)
+  g.setGraph({
+    rankdir: "LR",
+    nodesep: 50,
+    ranksep: 80,
     marginx: 40,
     marginy: 30,
   });
 
-  // Only add step nodes (not swimlane labels) to the graph
-  const stepNodes = nodes.filter(n => n.type === "flowStep");
-  
+  const stepNodes = nodes.filter((n) => n.type === "flowStep");
+
   stepNodes.forEach((node) => {
     g.setNode(node.id, { width: NODE_WIDTH, height: NODE_HEIGHT });
   });
@@ -204,33 +210,58 @@ function getLayoutedElements(
     g.setEdge(edge.source, edge.target);
   });
 
-  // Run Dagre layout algorithm
   Dagre.layout(g);
 
-  // Create lane Y position map
-  const laneYPositions = new Map<string, number>();
-  laneList.forEach((lane, index) => {
-    laneYPositions.set(lane, index * (LANE_HEIGHT + LANE_GAP));
+  // Build column assignments for dynamic lane heights
+  const dagreInfo = stepNodes.map((node) => {
+    const dagreNode = g.node(node.id);
+    return {
+      id: node.id,
+      lane: (node.data.lane as string) ?? laneList[0] ?? "",
+      dagreX: dagreNode.x,
+    };
   });
 
-  // Apply layout: use Dagre X positions, but fix Y to swimlane
+  const { laneColumnNodes, laneColumnCounts } = buildColumnAssignments(
+    dagreInfo,
+    NODE_WIDTH + NODE_GAP_X
+  );
+
+  const laneLayouts = computeLaneLayouts(laneList, laneColumnCounts, customHeights, HORIZONTAL_FLOW_CONFIG);
+
+  const laneLayoutMap = new Map<string, LaneLayout>();
+  laneLayouts.forEach((ll) => laneLayoutMap.set(ll.name, ll));
+
   const layoutedNodes = nodes.map((node) => {
     const dagreNode = g.node(node.id);
     if (!dagreNode) return node;
-    
-    const lane = node.data.lane;
-    const laneY = laneYPositions.get(lane) ?? 0;
-    
+
+    const lane = (node.data.lane as string) ?? laneList[0] ?? "";
+    const ll = laneLayoutMap.get(lane);
+
+    let rowIndex = 0;
+    if (ll) {
+      const colNodes = laneColumnNodes.get(lane);
+      if (colNodes) {
+        const col = Math.round(dagreNode.x / (NODE_WIDTH + NODE_GAP_X));
+        const nodesInCol = colNodes.get(col);
+        if (nodesInCol) {
+          rowIndex = nodesInCol.indexOf(node.id);
+          if (rowIndex < 0) rowIndex = 0;
+        }
+      }
+    }
+
     return {
       ...node,
       position: {
-        x: dagreNode.x - NODE_WIDTH / 2 + 20, // Offset from left edge
-        y: laneY + (LANE_HEIGHT - NODE_HEIGHT) / 2, // Center vertically in lane
+        x: dagreNode.x - NODE_WIDTH / 2 + 20,
+        y: ll ? getNodeYInLane(ll, rowIndex, HORIZONTAL_FLOW_CONFIG) : 0,
       },
     };
   });
 
-  return { nodes: layoutedNodes, edges };
+  return { nodes: layoutedNodes, edges, laneLayouts };
 }
 
 // ============================================
@@ -438,6 +469,18 @@ function HorizontalFlowViewInner({
     return Array.from(laneSet);
   }, [viewState, futureStateNodes, currentSteps]);
 
+  // Dynamic lane layouts
+  const customHeightsMap = useMemo(() => new Map<string, number | null>(), []);
+  const [laneLayouts, setLaneLayouts] = useState<LaneLayout[]>([]);
+  const laneLayoutsRef = useRef<LaneLayout[]>([]);
+
+  // Recompute default lane layouts when lanes change
+  useEffect(() => {
+    const defaults = computeLaneLayouts(laneList, new Map(), customHeightsMap, HORIZONTAL_FLOW_CONFIG);
+    setLaneLayouts(defaults);
+    laneLayoutsRef.current = defaults;
+  }, [laneList, customHeightsMap]);
+
   // Group observations by step
   const observationsByStep = useMemo(() => {
     const map = new Map<string, ObservationWithWasteTypes[]>();
@@ -580,6 +623,80 @@ function HorizontalFlowViewInner({
   const viewport = useViewport();
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // Resize handle drag state (local only for HorizontalFlowView)
+  const resizeDragRef = useRef<{
+    laneIndex: number;
+    startY: number;
+    startHeight: number;
+  } | null>(null);
+
+  const handleResizeMouseDown = useCallback(
+    (e: React.MouseEvent, laneIndex: number) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const ll = laneLayouts[laneIndex];
+      if (!ll) return;
+
+      resizeDragRef.current = { laneIndex, startY: e.clientY, startHeight: ll.height };
+
+      const handleMouseMove = (moveEvent: MouseEvent) => {
+        const drag = resizeDragRef.current;
+        if (!drag) return;
+        const deltaY = (moveEvent.clientY - drag.startY) / viewport.zoom;
+        const currentLL = laneLayoutsRef.current[drag.laneIndex];
+        const minHeight = currentLL?.autoHeight ?? HORIZONTAL_FLOW_CONFIG.minLaneHeight;
+        const newHeight = Math.max(minHeight, drag.startHeight + deltaY);
+
+        setLaneLayouts((prev) => {
+          const updated = [...prev];
+          if (updated[drag.laneIndex]) {
+            const old = updated[drag.laneIndex];
+            updated[drag.laneIndex] = { ...old, height: newHeight, customHeight: newHeight };
+            let yOff = 0;
+            for (let i = 0; i < updated.length; i++) {
+              updated[i] = { ...updated[i], yOffset: yOff };
+              yOff += updated[i].height + HORIZONTAL_FLOW_CONFIG.laneGap;
+            }
+          }
+          laneLayoutsRef.current = updated;
+          return updated;
+        });
+      };
+
+      const handleMouseUp = () => {
+        resizeDragRef.current = null;
+        window.removeEventListener("mousemove", handleMouseMove);
+        window.removeEventListener("mouseup", handleMouseUp);
+      };
+
+      window.addEventListener("mousemove", handleMouseMove);
+      window.addEventListener("mouseup", handleMouseUp);
+    },
+    [laneLayouts, viewport.zoom]
+  );
+
+  const handleResizeDoubleClick = useCallback(
+    (e: React.MouseEvent, laneIndex: number) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setLaneLayouts((prev) => {
+        const updated = [...prev];
+        if (updated[laneIndex]) {
+          const old = updated[laneIndex];
+          updated[laneIndex] = { ...old, height: old.autoHeight, customHeight: null };
+          let yOff = 0;
+          for (let i = 0; i < updated.length; i++) {
+            updated[i] = { ...updated[i], yOffset: yOff };
+            yOff += updated[i].height + HORIZONTAL_FLOW_CONFIG.laneGap;
+          }
+        }
+        laneLayoutsRef.current = updated;
+        return updated;
+      });
+    },
+    []
+  );
+
   // Handle drag over for toolbox drops
   const handleDragOver = useCallback((event: React.DragEvent) => {
     event.preventDefault();
@@ -602,7 +719,7 @@ function HorizontalFlowViewInner({
       });
       
       // Determine which lane based on Y position
-      const laneIndex = Math.floor(position.y / (LANE_HEIGHT + LANE_GAP));
+      const laneIndex = getLaneIndexForY(position.y, laneLayoutsRef.current);
       const lane = laneList[laneIndex] || laneList[0] || "Default";
       
       onCreateNode(lane, position, stepType);
@@ -619,9 +736,6 @@ function HorizontalFlowViewInner({
       }));
     }
   }, [isEditMode, onCreateNode, screenToFlowPosition, laneList]);
-
-  // Calculate scaled lane height based on viewport zoom
-  const scaledLaneHeight = LANE_HEIGHT * viewport.zoom;
 
   // Build nodes and edges based on view state
   useEffect(() => {
@@ -647,11 +761,11 @@ function HorizontalFlowViewInner({
     const flowNodes: Node<any>[] = [];
     let flowEdges: Edge[] = [];
 
-    // Create lane Y positions using the memoized laneList
+    // Use dynamic lane layouts for Y positions
+    const currentLayouts = laneLayoutsRef.current;
     const laneYPositions = new Map<string, number>();
-    laneList.forEach((lane, index) => {
-      const laneY = index * (LANE_HEIGHT + LANE_GAP);
-      laneYPositions.set(lane, laneY);
+    currentLayouts.forEach((ll) => {
+      laneYPositions.set(ll.name, ll.yOffset);
     });
 
     if (viewState === "future") {
@@ -792,13 +906,16 @@ function HorizontalFlowViewInner({
       
       if (needsInitialLayout && flowNodes.length > 0) {
         // Apply Dagre layout for initial positioning
-        const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
+        const { nodes: layoutedNodes, edges: layoutedEdges, laneLayouts: newLayouts } = getLayoutedElements(
           flowNodes,
           flowEdges,
-          laneList
+          laneList,
+          customHeightsMap
         );
         setNodes(layoutedNodes);
         setEdges(layoutedEdges);
+        setLaneLayouts(newLayouts);
+        laneLayoutsRef.current = newLayouts;
         hasInitialLayoutRef.current = true;
         
         // Save the Dagre-calculated positions to database so they persist
@@ -1011,16 +1128,18 @@ function HorizontalFlowViewInner({
   // Auto-layout handler for manual triggering
   const handleAutoLayout = useCallback(() => {
     if (nodes.length === 0) return;
-    
-    const laneList = Array.from(new Set(
+
+    const currentLaneList = Array.from(new Set(
       nodes
         .filter(n => n.type === "flowStep")
         .map(n => n.data.lane as string)
     ));
-    
-    const { nodes: layoutedNodes } = getLayoutedElements(nodes, edges, laneList);
+
+    const { nodes: layoutedNodes, laneLayouts: newLayouts } = getLayoutedElements(nodes, edges, currentLaneList, customHeightsMap);
     setNodes(layoutedNodes);
-    
+    setLaneLayouts(newLayouts);
+    laneLayoutsRef.current = newLayouts;
+
     // Save the new positions to database
     if (onNodePositionChange) {
       layoutedNodes.forEach((node) => {
@@ -1030,11 +1149,11 @@ function HorizontalFlowViewInner({
         }
       });
     }
-    
+
     setTimeout(() => {
       fitView({ padding: 0.15, duration: 300 });
     }, 50);
-  }, [nodes, edges, setNodes, fitView, onNodePositionChange]);
+  }, [nodes, edges, customHeightsMap, setNodes, fitView, onNodePositionChange]);
 
   // Handle node click - only allow clicks on future state nodes
   const handleNodeClick = useCallback(
@@ -1071,7 +1190,7 @@ function HorizontalFlowViewInner({
   return (
     <div ref={containerRef} className="relative h-[600px] w-full rounded-xl border overflow-hidden bg-slate-50">
       {/* Fixed Swimlane Labels - synced with React Flow viewport */}
-      <div 
+      <div
         className="absolute left-0 top-0 w-28 h-full z-20 bg-white/95 backdrop-blur-sm border-r border-slate-200"
         style={{
           transform: `translateY(${viewport.y}px)`,
@@ -1079,34 +1198,47 @@ function HorizontalFlowViewInner({
       >
         {laneList.map((lane, index) => {
           const colors = SWIMLANE_COLORS[index % SWIMLANE_COLORS.length];
+          const ll = laneLayouts[index];
+          const scaledHeight = (ll?.height ?? HORIZONTAL_FLOW_CONFIG.minLaneHeight) * viewport.zoom;
           return (
             <div
               key={lane}
               className={cn(
-                "flex items-center border-b border-slate-200 transition-all duration-75",
+                "relative border-b border-slate-200 transition-all duration-75",
                 colors.bg
               )}
               style={{
-                height: scaledLaneHeight,
+                height: scaledHeight,
                 borderLeftWidth: 4,
                 borderLeftColor: getAccentColor(index),
               }}
             >
-              <span 
-                className="px-2 font-semibold text-slate-700 whitespace-nowrap truncate"
-                style={{
-                  fontSize: `${Math.max(10, 13 * viewport.zoom)}px`,
-                }}
-              >
-                {lane}
-              </span>
+              <div className="flex items-center h-full">
+                <span
+                  className="px-2 font-semibold text-slate-700 whitespace-nowrap truncate"
+                  style={{
+                    fontSize: `${Math.max(10, 13 * viewport.zoom)}px`,
+                  }}
+                >
+                  {lane}
+                </span>
+              </div>
+              {/* Resize handle */}
+              {isEditMode && (
+                <div
+                  className="absolute bottom-0 left-0 right-0 h-[6px] cursor-row-resize hover:bg-blue-400/40 transition-colors z-20"
+                  onMouseDown={(e) => handleResizeMouseDown(e, index)}
+                  onDoubleClick={(e) => handleResizeDoubleClick(e, index)}
+                  title="Drag to resize lane height. Double-click to reset."
+                />
+              )}
             </div>
           );
         })}
       </div>
 
       {/* Swimlane Background Bands - synced with viewport */}
-      <div 
+      <div
         className="absolute left-28 right-0 top-0 pointer-events-none z-0"
         style={{
           transform: `translateY(${viewport.y}px)`,
@@ -1114,12 +1246,14 @@ function HorizontalFlowViewInner({
       >
         {laneList.map((lane, index) => {
           const colors = SWIMLANE_COLORS[index % SWIMLANE_COLORS.length];
+          const ll = laneLayouts[index];
+          const scaledHeight = (ll?.height ?? HORIZONTAL_FLOW_CONFIG.minLaneHeight) * viewport.zoom;
           return (
             <div
               key={lane}
               className={cn("w-full border-b border-dashed transition-all duration-75", colors.bg)}
               style={{
-                height: scaledLaneHeight,
+                height: scaledHeight,
                 opacity: 0.4,
                 borderColor: getAccentColor(index),
               }}
@@ -1346,7 +1480,7 @@ function HorizontalFlowViewInner({
                   y: event.clientY - reactFlowBounds.top,
                 };
                 // Determine which lane based on Y position
-                const laneIndex = Math.floor(position.y / (LANE_HEIGHT + LANE_GAP));
+                const laneIndex = getLaneIndexForY(position.y, laneLayoutsRef.current);
                 const lane = laneList[laneIndex] || laneList[0] || "Default";
                 onCreateNode(lane, position, "action");
               }

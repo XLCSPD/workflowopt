@@ -70,6 +70,7 @@ function StepNodeComponent({ data }: NodeProps<StepNodeData>) {
   } = data;
   const Icon = getStepIcon(step.step_type);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const isDecision = step.step_type === "decision";
 
   // Keep a local draft to avoid jitter while typing.
   const [draftName, setDraftName] = useState(step.step_name);
@@ -86,6 +87,113 @@ function StepNodeComponent({ data }: NodeProps<StepNodeData>) {
     }
   }, [isInlineEditing, step.step_name]);
 
+  // Decision nodes render as a diamond shape
+  if (isDecision) {
+    return (
+      <>
+        <Handle
+          type="target"
+          position={Position.Left}
+          className="w-3 h-3 bg-brand-charcoal border-2 border-white"
+        />
+
+        <div
+          onClick={() => {
+            console.log("StepNode clicked:", step.step_name, "onClick exists:", !!onClick);
+            onClick?.();
+          }}
+          className="relative flex items-center justify-center cursor-pointer"
+          style={{ width: 120, height: 120 }}
+        >
+          {/* Diamond shape — rotated square */}
+          <div
+            className={cn(
+              "absolute rotate-45 rounded-sm shadow-step-node transition-all duration-200",
+              getHeatmapColor(heatmapIntensity),
+              isSelected && "ring-2 ring-brand-gold shadow-step-node-selected",
+              !isSelected && "hover:shadow-step-node-hover border-2"
+            )}
+            style={{ width: 85, height: 85 }}
+          />
+
+          {/* Observation Badge */}
+          {observationCount > 0 && (
+            <div className="absolute -top-1 -right-1 z-20 flex items-center gap-1 px-2 py-0.5 rounded-full bg-orange-500 text-white text-xs font-medium">
+              <AlertTriangle className="h-3 w-3" />
+              {observationCount}
+            </div>
+          )}
+
+          {/* Content — centered, not rotated */}
+          <div className="relative z-10 text-center px-2 max-w-[100px]">
+            {isInlineEditing ? (
+              <input
+                ref={inputRef}
+                value={draftName}
+                onChange={(e) => setDraftName(e.target.value)}
+                onClick={(e) => e.stopPropagation()}
+                onDoubleClick={(e) => e.stopPropagation()}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    e.currentTarget.blur();
+                  } else if (e.key === "Escape") {
+                    e.preventDefault();
+                    setDraftName(initialName);
+                    onCancelInlineEdit?.();
+                  }
+                }}
+                onBlur={() => {
+                  onInlineEdit?.(draftName);
+                }}
+                className="step-node-inline-edit text-center text-xs"
+                style={{ width: 80 }}
+                aria-label="Edit step name"
+              />
+            ) : (
+              <p
+                className="font-medium text-xs text-brand-navy line-clamp-3"
+                onDoubleClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onStartInlineEdit?.();
+                }}
+                title={step.step_name}
+              >
+                {step.step_name}
+              </p>
+            )}
+          </div>
+
+          {/* Priority Score */}
+          {priorityScore > 0 && (
+            <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 z-20 px-1.5 py-0.5 rounded bg-white/90 text-xs">
+              <span
+                className={cn(
+                  "font-bold",
+                  priorityScore >= 15
+                    ? "text-red-600"
+                    : priorityScore >= 10
+                    ? "text-orange-600"
+                    : "text-yellow-600"
+                )}
+              >
+                {priorityScore}
+              </span>
+            </div>
+          )}
+        </div>
+
+        <Handle
+          type="source"
+          position={Position.Right}
+          className="w-3 h-3 bg-brand-charcoal border-2 border-white"
+        />
+      </>
+    );
+  }
+
+  // Standard rectangular node for all other step types
   return (
     <>
       <Handle

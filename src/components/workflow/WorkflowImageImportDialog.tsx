@@ -37,6 +37,7 @@ import {
   type WorkflowImportData,
 } from "@/lib/services/workflowImport";
 import type { ProcessStep } from "@/types";
+import { computeLaneLayouts, getNodeYInLane, IMPORT_CONFIG } from "@/lib/layout/swimlaneLayout";
 
 // Lazy-load ProcessMap to avoid loading ReactFlow/Dagre unless the preview step is reached
 const ProcessMap = lazy(() =>
@@ -121,10 +122,10 @@ interface AnalysisResult {
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB per file
 const MAX_IMAGES = 10;
+const MAX_IMAGE_DIMENSION = 7680; // Stay under Anthropic's 8000px limit
 const ACCEPTED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
 const ACCEPTED_EXTENSIONS = ".png,.jpg,.jpeg,.webp,.gif,.pdf";
 
-const LANE_HEIGHT = 120;
 const STEP_WIDTH = 180;
 const STEP_GAP = 40;
 
@@ -147,42 +148,100 @@ function fileToBase64(file: File): Promise<string> {
 }
 
 async function extractPdfPages(file: File): Promise<UploadedImage[]> {
-  // Dynamically import pdfjs-dist to avoid SSR issues
-  const pdfjs = await import("pdfjs-dist");
+  // Use the minified ESM build to avoid webpack runtime conflicts
+  // (pdf.mjs embeds its own __webpack_require__ which clashes with Next.js webpack)
+  const pdfjs = await import("pdfjs-dist/build/pdf.min.mjs");
 
-  // Set worker source
+  // Set worker source (CDN with matching version)
   if (!pdfjs.GlobalWorkerOptions.workerSrc) {
     pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
   }
 
   const arrayBuffer = await file.arrayBuffer();
-  const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
-  const images: UploadedImage[] = [];
 
+  let pdf;
+  try {
+    pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[ImageImport] PDF load error:", msg);
+    if (msg.toLowerCase().includes("password")) {
+      throw new Error("This PDF is password-protected. Please remove the password and try again.");
+    }
+    throw new Error(`Could not read PDF: ${msg}`);
+  }
+
+  if (pdf.numPages === 0) {
+    throw new Error("The PDF has no pages.");
+  }
+
+  const images: UploadedImage[] = [];
   const pageCount = Math.min(pdf.numPages, MAX_IMAGES);
 
   for (let pageNum = 1; pageNum <= pageCount; pageNum++) {
+    if (images.length >= MAX_IMAGES) break;
+
     const page = await pdf.getPage(pageNum);
-    const viewport = page.getViewport({ scale: 2.0 });
-    const canvas = document.createElement("canvas");
-    canvas.width = viewport.width;
-    canvas.height = viewport.height;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) continue;
+    // Always render at 2.0x for text clarity
+    const scale = 2.0;
+    const viewport = page.getViewport({ scale });
+    const fullCanvas = document.createElement("canvas");
+    fullCanvas.width = viewport.width;
+    fullCanvas.height = viewport.height;
+    const fullCtx = fullCanvas.getContext("2d");
+    if (!fullCtx) continue;
 
-    await page.render({ canvasContext: ctx, viewport, canvas } as Parameters<typeof page.render>[0]).promise;
+    await page.render({ canvas: fullCanvas, viewport }).promise;
 
-    const dataUrl = canvas.toDataURL("image/png");
-    const base64 = dataUrl.split(",")[1];
+    // If the rendered page fits within the API limit, use it directly
+    if (viewport.width <= MAX_IMAGE_DIMENSION && viewport.height <= MAX_IMAGE_DIMENSION) {
+      const dataUrl = fullCanvas.toDataURL("image/png");
+      images.push({
+        id: crypto.randomUUID(),
+        file,
+        base64: dataUrl.split(",")[1],
+        mediaType: "image/png",
+        previewUrl: dataUrl,
+        pageLabel: pageCount > 1 ? `Page ${pageNum}` : "Full page",
+      });
+    } else {
+      // Tile the page into sections that each fit within the limit
+      const cols = Math.ceil(viewport.width / MAX_IMAGE_DIMENSION);
+      const rows = Math.ceil(viewport.height / MAX_IMAGE_DIMENSION);
+      const tileW = Math.ceil(viewport.width / cols);
+      const tileH = Math.ceil(viewport.height / rows);
+      const totalTiles = cols * rows;
 
-    images.push({
-      id: crypto.randomUUID(),
-      file,
-      base64,
-      mediaType: "image/png",
-      previewUrl: dataUrl,
-      pageLabel: `Page ${pageNum}`,
-    });
+      for (let row = 0; row < rows; row++) {
+        for (let col = 0; col < cols; col++) {
+          if (images.length >= MAX_IMAGES) break;
+
+          const sx = col * tileW;
+          const sy = row * tileH;
+          const sw = Math.min(tileW, viewport.width - sx);
+          const sh = Math.min(tileH, viewport.height - sy);
+
+          const tileCanvas = document.createElement("canvas");
+          tileCanvas.width = sw;
+          tileCanvas.height = sh;
+          const tileCtx = tileCanvas.getContext("2d");
+          if (!tileCtx) continue;
+
+          tileCtx.drawImage(fullCanvas, sx, sy, sw, sh, 0, 0, sw, sh);
+
+          const dataUrl = tileCanvas.toDataURL("image/png");
+          const tileIndex = row * cols + col + 1;
+          images.push({
+            id: crypto.randomUUID(),
+            file,
+            base64: dataUrl.split(",")[1],
+            mediaType: "image/png",
+            previewUrl: dataUrl,
+            pageLabel: `Page ${pageNum} (section ${tileIndex}/${totalTiles})`,
+          });
+        }
+      }
+    }
   }
 
   return images;
@@ -190,11 +249,14 @@ async function extractPdfPages(file: File): Promise<UploadedImage[]> {
 
 function importDataToPreviewProps(data: WorkflowImportData): {
   steps: ProcessStep[];
-  connections: { source: string; target: string }[];
+  connections: { source: string; target: string; label?: string }[];
   lanes: string[];
 } {
   const lanes = data.lanes || Array.from(new Set(data.steps.map((s) => s.lane)));
   const laneIndices = new Map(lanes.map((l, i) => [l, i]));
+
+  // Compute lane layouts for positioning
+  const laneLayouts = computeLaneLayouts(lanes, new Map(), new Map(), IMPORT_CONFIG);
 
   const stepsByLane = new Map<string, typeof data.steps>();
   data.steps.forEach((step) => {
@@ -212,6 +274,7 @@ function importDataToPreviewProps(data: WorkflowImportData): {
     );
     sorted.forEach((step, idx) => {
       const laneIndex = laneIndices.get(lane) || 0;
+      const ll = laneLayouts[laneIndex];
       processSteps.push({
         id: step.id,
         process_id: "image-import-preview",
@@ -223,7 +286,7 @@ function importDataToPreviewProps(data: WorkflowImportData): {
         lead_time_minutes: step.lead_time_minutes,
         cycle_time_minutes: step.cycle_time_minutes,
         position_x: STEP_GAP + idx * (STEP_WIDTH + STEP_GAP),
-        position_y: laneIndex * LANE_HEIGHT + LANE_HEIGHT / 2 - 35,
+        position_y: ll ? getNodeYInLane(ll, 0, IMPORT_CONFIG) : 0,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       });
@@ -233,6 +296,7 @@ function importDataToPreviewProps(data: WorkflowImportData): {
   const connections = (data.connections || []).map((c) => ({
     source: c.from,
     target: c.to,
+    label: c.label,
   }));
 
   return { steps: processSteps, connections, lanes };
@@ -345,10 +409,14 @@ export function WorkflowImageImportDialog({
               const remaining =
                 MAX_IMAGES - uploadedImages.length - newImages.length;
               newImages.push(...pages.slice(0, remaining));
-            } catch {
+            } catch (err) {
+              const detail = err instanceof Error ? err.message : "Unknown error";
+              console.error("[ImageImport] PDF extraction failed:", detail);
               toast({
                 title: "PDF extraction failed",
-                description: `Could not extract pages from "${file.name}". Try converting to images first.`,
+                description: detail.startsWith("Could not read PDF") || detail.startsWith("This PDF")
+                  ? detail
+                  : `Could not extract pages from "${file.name}". ${detail}`,
                 variant: "destructive",
               });
             }

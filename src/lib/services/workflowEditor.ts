@@ -361,6 +361,23 @@ export async function updateLaneColor(
   return data as ProcessLane;
 }
 
+export async function updateLaneHeight(
+  processId: string,
+  laneId: string,
+  height: number | null
+): Promise<ProcessLane> {
+  const { data, error } = await supabase
+    .from("process_lanes")
+    .update({ custom_height: height })
+    .eq("id", laneId)
+    .eq("process_id", processId)
+    .select("*")
+    .single();
+
+  if (error) throw error;
+  return data as ProcessLane;
+}
+
 export async function deleteLaneMoveSteps(
   processId: string,
   laneId: string,

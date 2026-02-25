@@ -96,7 +96,7 @@ const nextConfig = {
               // Without this, default-src 'self' blocks media and videos show 0:00 / 0:00.
               "media-src 'self' blob: https:",
               // Allow PDF.js worker (uses blob: URLs) and connections to fetch PDFs
-              "worker-src 'self' blob:",
+              "worker-src 'self' blob: https://unpkg.com",
               `connect-src 'self' ${process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://*.supabase.co'} wss://*.supabase.co https://unpkg.com`,
               // Allow iframes to load PDFs from Supabase Storage
               `frame-src 'self' ${process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://*.supabase.co'}`,

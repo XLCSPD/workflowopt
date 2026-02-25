@@ -61,6 +61,7 @@ export interface ProcessLane {
   order_index: number;
   bg_color?: string | null;
   border_color?: string | null;
+  custom_height?: number | null;
   created_at: string;
   updated_at: string;
 }

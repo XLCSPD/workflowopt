@@ -30,9 +30,19 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Flame, LayoutGrid, RotateCcw, Lock, ZoomIn, ZoomOut, GitBranch } from "lucide-react";
-import type { ProcessStep, InformationFlowWithRelations, FlowType } from "@/types";
+import type { ProcessStep, ProcessLane as ProcessLaneType, InformationFlowWithRelations, FlowType } from "@/types";
 import { FLOW_TYPE_CONFIG } from "@/types/informationFlow";
 import { STEP_TOOLBOX_MIME } from "@/components/workflow/StepToolbox";
+import {
+  type LaneLayout,
+  PROCESS_MAP_CONFIG,
+  buildColumnAssignments,
+  computeLaneLayouts,
+  computeLaneLayoutsFromPositions,
+  getNodeYInLane,
+  getLaneIndexForY,
+  buildCustomHeightsMap,
+} from "@/lib/layout/swimlaneLayout";
 
 const nodeTypes = {
   stepNode: StepNode,
@@ -51,9 +61,10 @@ const DEFAULT_SELECTED_STEP_IDS: string[] = [];
 interface ProcessMapProps {
   workflowId: string;
   lanes?: string[];
+  laneData?: ProcessLaneType[];
   laneStyles?: Record<string, { bg: string; border: string }>;
   steps: ProcessStep[];
-  connections: { source: string; target: string }[];
+  connections: { source: string; target: string; label?: string }[];
   observations?: Record<string, { count: number; priorityScore: number }>;
   selectedStepId?: string | null;
   selectedStepIds?: string[];
@@ -91,6 +102,8 @@ interface ProcessMapProps {
   showFlowLabels?: boolean;
   // Callback when clicking an edge without a flow (to create a new flow)
   onEdgeClickForNewFlow?: (sourceStepId: string, targetStepId: string) => void;
+  // Callback when user manually resizes a lane (null = reset to auto)
+  onLaneHeightChange?: (laneId: string, height: number | null) => void;
 }
 
 // Helper to get localStorage key for a workflow
@@ -121,71 +134,94 @@ function getSwimlaneColor(
   return SWIMLANE_COLOR_PALETTE[laneIndex % SWIMLANE_COLOR_PALETTE.length];
 }
 
-const SWIMLANE_HEIGHT = 120;
 const NODE_WIDTH = 160;
 const NODE_HEIGHT = 70;
 
-// Calculate the Y center position for a swimlane
-function getSwimlaneYCenter(laneIndex: number): number {
-  return laneIndex * SWIMLANE_HEIGHT + SWIMLANE_HEIGHT / 2 - NODE_HEIGHT / 2;
-}
-
-// Auto-layout function using Dagre
+// Auto-layout function using Dagre with dynamic lane heights
 function getLayoutedElements(
   nodes: Node[],
   edges: Edge[],
-  swimlanes: { name: string; steps: ProcessStep[] }[]
-): { nodes: Node[]; edges: Edge[] } {
+  swimlanes: { name: string; steps: ProcessStep[] }[],
+  customHeights: Map<string, number | null>
+): { nodes: Node[]; edges: Edge[]; laneLayouts: LaneLayout[] } {
   const g = new Dagre.graphlib.Graph().setDefaultEdgeLabel(() => ({}));
-  g.setGraph({ 
-    rankdir: "LR", 
-    nodesep: 40, 
+  g.setGraph({
+    rankdir: "LR",
+    nodesep: 40,
     ranksep: 80,
     marginx: 40,
     marginy: 20,
   });
 
-  // Add nodes to dagre graph
   nodes.forEach((node) => {
     g.setNode(node.id, { width: NODE_WIDTH, height: NODE_HEIGHT });
   });
 
-  // Add edges to dagre graph
   edges.forEach((edge) => {
     g.setEdge(edge.source, edge.target);
   });
 
-  // Run the layout algorithm
   Dagre.layout(g);
 
-  // Create lane name to index mapping
-  const laneIndexMap: Record<string, number> = {};
-  swimlanes.forEach((lane, idx) => {
-    laneIndexMap[lane.name] = idx;
+  // Build column assignments from Dagre X positions to determine row stacking
+  const dagreInfo = nodes.map((node) => {
+    const dagreNode = g.node(node.id);
+    return {
+      id: node.id,
+      lane: (node.data.step?.lane as string) ?? swimlanes[0]?.name ?? "",
+      dagreX: dagreNode.x,
+    };
   });
 
-  // Apply layout positions while respecting swimlanes
+  const { laneColumnNodes, laneColumnCounts } = buildColumnAssignments(
+    dagreInfo,
+    NODE_WIDTH + 40 // column bucket width
+  );
+
+  const laneNames = swimlanes.map((l) => l.name);
+  const laneLayouts = computeLaneLayouts(laneNames, laneColumnCounts, customHeights, PROCESS_MAP_CONFIG);
+
+  // Build a lookup: laneLayout by name
+  const laneLayoutMap = new Map<string, LaneLayout>();
+  laneLayouts.forEach((ll) => laneLayoutMap.set(ll.name, ll));
+
+  // Position nodes: Dagre X, dynamic Y within lane
   const layoutedNodes = nodes.map((node) => {
     const dagreNode = g.node(node.id);
-    const lane = node.data.step?.lane;
-    const laneIndex = laneIndexMap[lane] ?? 0;
-    
+    const lane = (node.data.step?.lane as string) ?? laneNames[0] ?? "";
+    const ll = laneLayoutMap.get(lane);
+
+    // Determine row index within the column for this lane
+    let rowIndex = 0;
+    if (ll) {
+      const colNodes = laneColumnNodes.get(lane);
+      if (colNodes) {
+        const col = Math.round(dagreNode.x / (NODE_WIDTH + 40));
+        const nodesInCol = colNodes.get(col);
+        if (nodesInCol) {
+          rowIndex = nodesInCol.indexOf(node.id);
+          if (rowIndex < 0) rowIndex = 0;
+        }
+      }
+    }
+
     return {
       ...node,
       position: {
         x: dagreNode.x - NODE_WIDTH / 2,
-        y: getSwimlaneYCenter(laneIndex),
+        y: ll ? getNodeYInLane(ll, rowIndex, PROCESS_MAP_CONFIG) : 0,
       },
     };
   });
 
-  return { nodes: layoutedNodes, edges };
+  return { nodes: layoutedNodes, edges, laneLayouts };
 }
 
 // Inner component that uses useReactFlow
 function ProcessMapInner({
   workflowId,
   lanes,
+  laneData,
   laneStyles,
   steps,
   connections,
@@ -221,11 +257,127 @@ function ProcessMapInner({
   onSelectFlow,
   showFlowLabels = true,
   onEdgeClickForNewFlow,
+  onLaneHeightChange,
 }: ProcessMapProps) {
   const { fitView, zoomIn, zoomOut, screenToFlowPosition, getNodes } = useReactFlow();
   const viewport = useViewport();
   const canvasRef = useRef<HTMLDivElement | null>(null);
-  
+
+  // Build custom heights map from lane data
+  const customHeightsMap = useMemo(
+    () => buildCustomHeightsMap(laneData ?? []),
+    [laneData]
+  );
+
+  // Lane layouts state (dynamic heights per lane)
+  const [laneLayouts, setLaneLayouts] = useState<LaneLayout[]>([]);
+  const laneLayoutsRef = useRef<LaneLayout[]>([]);
+  const onLaneHeightChangeRef = useRef(onLaneHeightChange);
+  onLaneHeightChangeRef.current = onLaneHeightChange;
+
+  // Resize handle drag state
+  const resizeDragRef = useRef<{
+    laneIndex: number;
+    startY: number;
+    startHeight: number;
+  } | null>(null);
+
+  const handleResizeMouseDown = useCallback(
+    (e: React.MouseEvent, laneIndex: number) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const ll = laneLayouts[laneIndex];
+      if (!ll) return;
+
+      resizeDragRef.current = {
+        laneIndex,
+        startY: e.clientY,
+        startHeight: ll.height,
+      };
+
+      const handleMouseMove = (moveEvent: MouseEvent) => {
+        const drag = resizeDragRef.current;
+        if (!drag) return;
+
+        const deltaY = (moveEvent.clientY - drag.startY) / viewport.zoom;
+        const ll = laneLayouts[drag.laneIndex];
+        const minHeight = ll?.autoHeight ?? PROCESS_MAP_CONFIG.minLaneHeight;
+        const newHeight = Math.max(minHeight, drag.startHeight + deltaY);
+
+        setLaneLayouts((prev) => {
+          const updated = [...prev];
+          if (updated[drag.laneIndex]) {
+            const old = updated[drag.laneIndex];
+            updated[drag.laneIndex] = { ...old, height: newHeight, customHeight: newHeight };
+            // Recompute yOffsets
+            let yOffset = 0;
+            for (let i = 0; i < updated.length; i++) {
+              updated[i] = { ...updated[i], yOffset };
+              yOffset += updated[i].height + PROCESS_MAP_CONFIG.laneGap;
+            }
+          }
+          laneLayoutsRef.current = updated;
+          return updated;
+        });
+      };
+
+      const handleMouseUp = () => {
+        const drag = resizeDragRef.current;
+        if (drag) {
+          // Persist the new height
+          const ll = laneLayoutsRef.current[drag.laneIndex];
+          if (ll && onLaneHeightChangeRef.current) {
+            const laneObj = (laneData ?? []).find((l) => l.name === ll.name);
+            if (laneObj) {
+              onLaneHeightChangeRef.current(laneObj.id, Math.round(ll.height));
+            }
+          }
+        }
+        resizeDragRef.current = null;
+        window.removeEventListener("mousemove", handleMouseMove);
+        window.removeEventListener("mouseup", handleMouseUp);
+      };
+
+      window.addEventListener("mousemove", handleMouseMove);
+      window.addEventListener("mouseup", handleMouseUp);
+    },
+    [laneLayouts, laneData, viewport.zoom]
+  );
+
+  const handleResizeDoubleClick = useCallback(
+    (e: React.MouseEvent, laneIndex: number) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const ll = laneLayouts[laneIndex];
+      if (!ll) return;
+
+      // Reset to auto height
+      setLaneLayouts((prev) => {
+        const updated = [...prev];
+        if (updated[laneIndex]) {
+          const old = updated[laneIndex];
+          updated[laneIndex] = { ...old, height: old.autoHeight, customHeight: null };
+          let yOffset = 0;
+          for (let i = 0; i < updated.length; i++) {
+            updated[i] = { ...updated[i], yOffset };
+            yOffset += updated[i].height + PROCESS_MAP_CONFIG.laneGap;
+          }
+        }
+        laneLayoutsRef.current = updated;
+        return updated;
+      });
+
+      // Persist null (auto) to DB
+      if (onLaneHeightChangeRef.current) {
+        const laneObj = (laneData ?? []).find((l) => l.name === ll.name);
+        if (laneObj) {
+          onLaneHeightChangeRef.current(laneObj.id, null);
+        }
+      }
+    },
+    [laneLayouts, laneData]
+  );
+
   // Local state for information flows when parent doesn't provide callbacks
   const [localShowFlows, setLocalShowFlows] = useState(showInformationFlows);
   const [localVisibleTypes, setLocalVisibleTypes] = useState<Set<FlowType>>(visibleFlowTypes);
@@ -398,17 +550,21 @@ function ProcessMapInner({
     [isEditMode]
   );
 
+  // Compute default lane layouts whenever swimlanes or custom heights change
+  useEffect(() => {
+    const laneNames = swimlanes.map((l) => l.name);
+    const defaults = computeLaneLayouts(laneNames, new Map(), customHeightsMap, PROCESS_MAP_CONFIG);
+    setLaneLayouts(defaults);
+    laneLayoutsRef.current = defaults;
+  }, [swimlanes, customHeightsMap]);
+
   const getLaneForY = useCallback(
     (y: number): string => {
       if (swimlanes.length === 0) return "Requester";
-      const laneIndex = Math.max(
-        0,
-        Math.min(
-          swimlanes.length - 1,
-          Math.floor((y + NODE_HEIGHT / 2) / SWIMLANE_HEIGHT)
-        )
-      );
-      return swimlanes[laneIndex]?.name ?? swimlanes[0]?.name ?? "Requester";
+      const layouts = laneLayoutsRef.current;
+      if (layouts.length === 0) return swimlanes[0]?.name ?? "Requester";
+      const idx = getLaneIndexForY(y, layouts);
+      return swimlanes[idx]?.name ?? swimlanes[0]?.name ?? "Requester";
     },
     [swimlanes]
   );
@@ -455,9 +611,10 @@ function ProcessMapInner({
           y: rect.top + rect.height / 2,
         });
 
+        const ll = laneLayoutsRef.current[laneIndex];
         onQuickAddStepRef.current(lane, {
           x: center.x,
-          y: getSwimlaneYCenter(laneIndex),
+          y: ll ? getNodeYInLane(ll, 0, PROCESS_MAP_CONFIG) : 0,
         });
       } else if (key === "delete" || key === "backspace") {
         // Handle multi-select deletion first (use React Flow's selection state)
@@ -534,9 +691,10 @@ function ProcessMapInner({
           hasNewPositions = true;
         } else {
           // Calculate default position
+          const ll = laneLayoutsRef.current[laneIndex];
           position = {
             x: 40 + stepIndex * (NODE_WIDTH + 40),
-            y: getSwimlaneYCenter(laneIndex),
+            y: ll ? getNodeYInLane(ll, 0, PROCESS_MAP_CONFIG) : laneIndex * PROCESS_MAP_CONFIG.minLaneHeight + PROCESS_MAP_CONFIG.lanePaddingY,
           };
           newPositionsToSave[step.id] = position;
           hasNewPositions = true;
@@ -662,6 +820,13 @@ function ProcessMapInner({
           type: MarkerType.ArrowClosed,
           color: "#545454",
         },
+        ...(conn.label ? {
+          label: conn.label,
+          labelStyle: { fontSize: 11, fontWeight: 600, fill: "#545454" },
+          labelBgStyle: { fill: "white", fillOpacity: 0.9, stroke: "#545454", strokeWidth: 0.5 },
+          labelBgPadding: [4, 8] as [number, number],
+          labelBgBorderRadius: 4,
+        } : {}),
       };
     });
   }, [connections, flowLookup, effectiveShowFlows, effectiveVisibleTypes, showFlowLabels, selectedFlowId]);
@@ -812,16 +977,24 @@ function ProcessMapInner({
     try {
       localStorage.removeItem(getLayoutStorageKey(workflowId));
       setHasLayoutSaved(false);
+
+      // Compute default single-row layouts
+      const laneNames = swimlanes.map((l) => l.name);
+      const defaultLayouts = computeLaneLayouts(laneNames, new Map(), customHeightsMap, PROCESS_MAP_CONFIG);
+      setLaneLayouts(defaultLayouts);
+      laneLayoutsRef.current = defaultLayouts;
+
       // Reset to initial positions
       const resetNodes: Node[] = [];
       swimlanes.forEach((lane, laneIndex) => {
+        const ll = defaultLayouts[laneIndex];
         lane.steps.forEach((step, stepIndex) => {
           resetNodes.push({
             id: step.id,
             type: "stepNode",
             position: {
               x: step.position_x || (40 + stepIndex * (NODE_WIDTH + 40)),
-              y: step.position_y || getSwimlaneYCenter(laneIndex),
+              y: step.position_y || (ll ? getNodeYInLane(ll, 0, PROCESS_MAP_CONFIG) : 0),
             },
             data: {
               step,
@@ -841,57 +1014,70 @@ function ProcessMapInner({
     } catch (e) {
       console.error('Failed to clear layout:', e);
     }
-  }, [workflowId, swimlanes, selectedStepId, observations, handleNodeClick, setNodes, fitView]);
+  }, [workflowId, swimlanes, customHeightsMap, selectedStepId, observations, handleNodeClick, setNodes, fitView]);
 
-  // Handle node changes - save when dragging ends
+  // Handle node changes - save when dragging ends, recompute lane layouts
   const handleNodesChange = useCallback(
     (changes: NodeChange[]) => {
       onNodesChange(changes);
-      
+
       // Check if any node finished dragging
       const dragEnd = changes.some(
         (change) => change.type === 'position' && change.dragging === false
       );
-      
+
       if (dragEnd) {
-        // Save after a small delay to get final positions
+        // Save after a small delay to get final positions, then recompute lane layouts
         setTimeout(() => {
           setNodes((currentNodes) => {
             saveLayout(currentNodes);
+
+            // Recompute lane layouts from actual node positions
+            const laneNames = swimlanes.map((l) => l.name);
+            const nodesByLane = new Map<string, Array<{ y: number }>>();
+            for (const n of currentNodes) {
+              const lane = (n.data.step?.lane as string) ?? "";
+              if (!nodesByLane.has(lane)) nodesByLane.set(lane, []);
+              nodesByLane.get(lane)!.push({ y: n.position.y });
+            }
+            const newLayouts = computeLaneLayoutsFromPositions(laneNames, nodesByLane, customHeightsMap, PROCESS_MAP_CONFIG);
+            setLaneLayouts(newLayouts);
+            laneLayoutsRef.current = newLayouts;
+
             return currentNodes;
           });
         }, 50);
       }
     },
-    [onNodesChange, saveLayout, setNodes]
+    [onNodesChange, saveLayout, setNodes, swimlanes, customHeightsMap]
   );
 
   // Auto-layout handler - now saves after layout
   const handleAutoLayout = useCallback(() => {
-    const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
+    const { nodes: layoutedNodes, edges: layoutedEdges, laneLayouts: newLayouts } = getLayoutedElements(
       nodes,
       edges,
-      swimlanes
+      swimlanes,
+      customHeightsMap
     );
     setNodes(layoutedNodes);
     setEdges(layoutedEdges);
-    
+    setLaneLayouts(newLayouts);
+    laneLayoutsRef.current = newLayouts;
+
     // Save the new layout
     saveLayout(layoutedNodes);
-    
+
     // Fit view after layout with a small delay
     setTimeout(() => {
       fitView({ padding: 0.2, duration: 300 });
     }, 50);
-  }, [nodes, edges, swimlanes, setNodes, setEdges, fitView, saveLayout]);
-
-  // Calculate the scaled height for each swimlane based on viewport zoom
-  const scaledSwimlaneHeight = SWIMLANE_HEIGHT * viewport.zoom;
+  }, [nodes, edges, swimlanes, customHeightsMap, setNodes, setEdges, fitView, saveLayout]);
 
   return (
     <div className="h-full w-full relative overflow-hidden">
       {/* Swimlane Labels - synced with React Flow viewport */}
-      <div 
+      <div
         className="absolute left-0 top-0 w-32 z-10 bg-white border-r border-border"
         style={{
           transform: `translateY(${viewport.y}px)`,
@@ -899,25 +1085,38 @@ function ProcessMapInner({
       >
         {swimlanes.map((lane, laneIndex) => {
           const colors = getSwimlaneColor(lane.name, laneIndex, laneStyles);
+          const ll = laneLayouts[laneIndex];
+          const scaledHeight = (ll?.height ?? PROCESS_MAP_CONFIG.minLaneHeight) * viewport.zoom;
           return (
             <div
               key={lane.name}
-              className="flex items-center justify-center border-b transition-all duration-75"
+              className="relative border-b transition-all duration-75"
               style={{
-                height: scaledSwimlaneHeight,
+                height: scaledHeight,
                 backgroundColor: colors.bg,
                 borderLeftWidth: 4,
                 borderLeftColor: colors.border,
               }}
             >
-              <span 
-                className="font-medium text-brand-navy whitespace-nowrap"
-                style={{
-                  fontSize: `${Math.max(10, 14 * viewport.zoom)}px`,
-                }}
-              >
-                {lane.name}
-              </span>
+              <div className="flex items-center justify-center h-full">
+                <span
+                  className="font-medium text-brand-navy whitespace-nowrap"
+                  style={{
+                    fontSize: `${Math.max(10, 14 * viewport.zoom)}px`,
+                  }}
+                >
+                  {lane.name}
+                </span>
+              </div>
+              {/* Resize handle */}
+              {isEditMode && (
+                <div
+                  className="absolute bottom-0 left-0 right-0 h-[6px] cursor-row-resize hover:bg-brand-gold/40 transition-colors z-20"
+                  onMouseDown={(e) => handleResizeMouseDown(e, laneIndex)}
+                  onDoubleClick={(e) => handleResizeDoubleClick(e, laneIndex)}
+                  title="Drag to resize lane height. Double-click to reset."
+                />
+              )}
             </div>
           );
         })}
@@ -955,7 +1154,7 @@ function ProcessMapInner({
         }}
       >
         {/* Swimlane Background Bands - positioned in viewport space */}
-        <div 
+        <div
           className="absolute left-0 right-0 pointer-events-none z-0"
           style={{
             transform: `translateY(${viewport.y}px)`,
@@ -963,12 +1162,14 @@ function ProcessMapInner({
         >
           {swimlanes.map((lane, laneIndex) => {
             const colors = getSwimlaneColor(lane.name, laneIndex, laneStyles);
+            const ll = laneLayouts[laneIndex];
+            const scaledHeight = (ll?.height ?? PROCESS_MAP_CONFIG.minLaneHeight) * viewport.zoom;
             return (
               <div
                 key={lane.name}
                 className="w-full border-b transition-all duration-75"
                 style={{
-                  height: scaledSwimlaneHeight,
+                  height: scaledHeight,
                   backgroundColor: colors.bg,
                   opacity: 0.3,
                   borderColor: colors.border,

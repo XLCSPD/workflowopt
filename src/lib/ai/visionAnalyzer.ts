@@ -42,11 +42,20 @@ function buildVisionPrompt(
 ): { system: string; user: string } {
   const system = `You are an expert at analyzing flowchart diagrams and converting them into structured workflow data.
 You can read hand-drawn sketches, whiteboard photos, digital diagrams (Visio, Lucidchart, draw.io), and PDF flowcharts.
-You must extract the workflow structure and return it as JSON.`;
+You must extract the workflow structure and return it as JSON.
+
+CRITICAL RULES — READ CAREFULLY:
+- You must ONLY extract text that you can LITERALLY READ in the image. Never guess, infer, or fabricate step names.
+- If you cannot clearly read the text inside a shape, use "[unreadable]" as the step name and add a warning.
+- Do NOT interpret or paraphrase — copy text exactly as written in each shape.
+- The workflow name must come from a visible title/header in the image, not from your interpretation.
+- If the image has small or blurry text, report "low" confidence and list which steps had unclear text.
+- NEVER generate a workflow based on what you think the diagram MIGHT be about. Only report what you can SEE.
+- If you cannot read most of the text in the image, return success: false with an explanation.`;
 
   const multiImageNote =
     imageCount > 1
-      ? `\nYou are being given ${imageCount} images that represent parts of the SAME workflow. Combine them into a single coherent workflow. If the images show sequential pages, connect the last step of each page to the first step of the next page where appropriate.`
+      ? `\nYou are being given ${imageCount} images that represent parts of the SAME workflow. Some images may be tiled sections of a single large page (labeled "section 1/4", "section 2/4", etc.) — mentally stitch these together as a grid (left-to-right, top-to-bottom) to reconstruct the full page. Combine all pages into a single coherent workflow. If the images show sequential pages, connect the last step of each page to the first step of the next page where appropriate.`
       : "";
 
   const hintNote = userHint
@@ -61,13 +70,13 @@ Return a JSON object with this EXACT structure:
   "confidence": "high" | "medium" | "low",
   "warnings": ["any issues or assumptions you made"],
   "workflow": {
-    "name": "Name of the workflow (infer from title or content)",
+    "name": "Name of the workflow (use exact title text visible in the image)",
     "description": "Brief description of what this workflow does",
     "lanes": ["Swimlane1", "Swimlane2"],
     "steps": [
       {
         "id": "step-1",
-        "name": "Step name (text from the shape)",
+        "name": "Step name (EXACT text copied from the shape — do not paraphrase)",
         "lane": "Which swimlane this step belongs to",
         "type": "action | decision | start | end | subprocess",
         "description": "Optional description"
@@ -89,6 +98,9 @@ Rules:
 - Use sequential IDs: "step-1", "step-2", etc.
 - Capture ALL connections/arrows between shapes, including labels on decision branches.
 - Assign an "order" field to each step based on the logical flow order (left-to-right, top-to-bottom).
+- IMPORTANT: Every step name MUST be the exact text you read from the shape in the image. Do not rename, paraphrase, or invent step names.
+- IMPORTANT: Every swimlane name MUST be the exact label you read from the lane header in the image. Do not rename or invent lane names.
+- If you can only partially read text, include the partial text with "[?]" for unclear portions (e.g., "Replenish[?] Pick").
 - If the image is NOT a flowchart, is too blurry, or you cannot read it, return:
   {
     "success": false,
@@ -142,8 +154,8 @@ async function callOpenAIVision(
         { role: "system", content: systemPrompt },
         { role: "user", content: contentBlocks },
       ],
-      temperature: 0.3,
-      max_tokens: 8000,
+      temperature: 0.1,
+      max_tokens: 16000,
       response_format: { type: "json_object" },
     }),
   });
@@ -202,7 +214,8 @@ async function callAnthropicVision(
     },
     body: JSON.stringify({
       model: "claude-sonnet-4-20250514",
-      max_tokens: 8000,
+      max_tokens: 16000,
+      temperature: 0.1,
       system: systemPrompt,
       messages: [{ role: "user", content: contentBlocks }],
     }),
@@ -290,7 +303,25 @@ export async function analyzeFlowchartImages(
 
   const { system, user } = buildVisionPrompt(images.length, userHint);
 
-  const llmResponse = await callVisionLLM(images, system, user);
+  let llmResponse;
+  try {
+    llmResponse = await callVisionLLM(images, system, user);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[visionAnalyzer] LLM call failed:", msg);
+    return {
+      success: false,
+      error: `AI analysis failed: ${msg}`,
+      confidence: "low" as const,
+      warnings: [],
+      suggestions: [
+        "Try uploading a smaller or lower-resolution image",
+        "Ensure the image is a valid flowchart",
+      ],
+      model: "",
+      provider: "anthropic" as const,
+    };
+  }
 
   // Parse the AI response
   const repairedJson = tryRepairJson(llmResponse.content);
@@ -358,10 +389,45 @@ export async function analyzeFlowchartImages(
     };
   }
 
-  const confidence =
+  let confidence =
     (parsed.confidence as "high" | "medium" | "low") || "medium";
   const aiWarnings = (parsed.warnings as string[]) || [];
   const schemaWarnings = validation.warnings.map((w) => w.message);
+
+  // Post-validation: check for signs of hallucination or low-quality extraction
+  if (validation.data) {
+    const steps = validation.data.steps || [];
+    const unreadableCount = steps.filter(
+      (s) =>
+        s.name.includes("[unreadable]") ||
+        s.name.includes("[?]")
+    ).length;
+
+    if (unreadableCount > 0) {
+      const ratio = unreadableCount / steps.length;
+      if (ratio > 0.5) {
+        // More than half the steps are unreadable — likely a bad extraction
+        return {
+          success: false,
+          error: `Too many steps (${unreadableCount}/${steps.length}) had unreadable text. The image may be too small or blurry.`,
+          confidence: "low",
+          warnings: [...aiWarnings, ...schemaWarnings],
+          suggestions: [
+            "Try uploading a higher-resolution image",
+            "Zoom in on sections and upload as multiple images",
+            "Ensure all text in the flowchart is clearly legible",
+          ],
+          model: llmResponse.model,
+          provider: llmResponse.provider,
+        };
+      } else if (ratio > 0.2) {
+        confidence = "low";
+        aiWarnings.push(
+          `${unreadableCount} of ${steps.length} steps had partially unreadable text`
+        );
+      }
+    }
+  }
 
   return {
     success: true,

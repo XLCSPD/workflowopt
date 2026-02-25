@@ -173,8 +173,12 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json(
-      { success: false, error: "Failed to analyze image. Please try again." },
+      { success: false, error: `Failed to analyze image: ${message}` },
       { status: 500 }
     );
   }
 }
+
+// Allow longer execution for AI vision analysis
+export const maxDuration = 60;
+

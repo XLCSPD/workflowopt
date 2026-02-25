@@ -2,6 +2,7 @@ import { z } from "zod";
 import { getSupabaseClient } from "@/lib/supabase/client";
 import type { Process, ProcessStep, StepType } from "@/types";
 import type { StepConnection } from "./workflows";
+import { computeLaneLayouts, getNodeYInLane, IMPORT_CONFIG } from "@/lib/layout/swimlaneLayout";
 
 const supabase = getSupabaseClient();
 
@@ -517,9 +518,11 @@ export async function importWorkflow(
     const lanes = data.lanes || Array.from(new Set(data.steps.map((s) => s.lane)));
     lanes.forEach((lane, idx) => laneIndices.set(lane, idx));
 
-    const LANE_HEIGHT = 120;
     const STEP_WIDTH = 180;
     const STEP_GAP = 40;
+
+    // Compute lane layouts (single-row for sequential import)
+    const laneLayouts = computeLaneLayouts(lanes, new Map(), new Map(), IMPORT_CONFIG);
 
     // Group steps by lane for positioning
     const stepsByLane = new Map<string, ImportStep[]>();
@@ -544,7 +547,8 @@ export async function importWorkflow(
     // Simple left-to-right layout per lane
     stepsByLane.forEach((laneSteps, lane) => {
       const laneIndex = laneIndices.get(lane) || 0;
-      const y = laneIndex * LANE_HEIGHT + LANE_HEIGHT / 2 - 35; // Center in lane
+      const ll = laneLayouts[laneIndex];
+      const y = ll ? getNodeYInLane(ll, 0, IMPORT_CONFIG) : 0;
 
       laneSteps.forEach((step, stepIndex) => {
         const x = STEP_GAP + stepIndex * (STEP_WIDTH + STEP_GAP);
