@@ -71,43 +71,62 @@ export default function AcceptInvitePage() {
   useEffect(() => {
     let mounted = true;
 
-    const hydrateFromSession = async () => {
-      const { data } = await supabase.auth.getSession();
-      const session = data.session;
+    const applySession = (session: Session) => {
       if (!mounted) return;
+      setIsValidSession(true);
+      setEmail(session.user.email ?? "");
+      const meta = (session.user.user_metadata || {}) as Record<string, unknown>;
+      const metaName = typeof meta.name === "string" ? meta.name : "";
+      const metaInvitationId =
+        typeof meta.invitation_id === "string" ? meta.invitation_id : undefined;
+      setInvitationId(metaInvitationId);
+      if (metaName) form.setValue("name", metaName);
+      setIsChecking(false);
+    };
 
-      if (session?.user?.email) {
-        setIsValidSession(true);
-        setEmail(session.user.email);
-        const meta = (session.user.user_metadata || {}) as Record<string, unknown>;
-        const metaName = typeof meta.name === "string" ? meta.name : "";
-        const metaInvitationId =
-          typeof meta.invitation_id === "string" ? meta.invitation_id : undefined;
-        setInvitationId(metaInvitationId);
-        if (metaName) form.setValue("name", metaName);
-        setIsChecking(false);
+    const hydrateFromSession = async () => {
+      // 1. Check for existing session (e.g. PKCE code was already exchanged by /auth/callback)
+      const { data } = await supabase.auth.getSession();
+      if (data.session?.user?.email) {
+        applySession(data.session);
         return;
       }
 
-      // Listen for auth state changes triggered by Supabase invite link
+      // 2. Handle implicit flow: extract tokens from URL hash fragment.
+      //    @supabase/ssr uses PKCE by default and won't auto-detect hash tokens.
+      const hash = window.location.hash.substring(1);
+      if (hash) {
+        const params = new URLSearchParams(hash);
+        const accessToken = params.get("access_token");
+        const refreshToken = params.get("refresh_token");
+
+        if (accessToken && refreshToken) {
+          const { data: sessionData, error } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken,
+          });
+
+          // Clear hash from URL to avoid re-processing on navigation
+          window.history.replaceState(null, "", window.location.pathname);
+
+          if (!error && sessionData.session) {
+            applySession(sessionData.session);
+            return;
+          }
+        }
+      }
+
+      if (!mounted) return;
+
+      // 3. Fallback: listen for auth state changes
       const { data: authListener } = supabase.auth.onAuthStateChange(
         (_event: AuthChangeEvent, newSession: Session | null) => {
-        if (!mounted) return;
-        if (newSession?.user?.email) {
-          setIsValidSession(true);
-          setEmail(newSession.user.email);
-          const meta = (newSession.user.user_metadata || {}) as Record<string, unknown>;
-          const metaName = typeof meta.name === "string" ? meta.name : "";
-          const metaInvitationId =
-            typeof meta.invitation_id === "string" ? meta.invitation_id : undefined;
-          setInvitationId(metaInvitationId);
-          if (metaName) form.setValue("name", metaName);
-          setIsChecking(false);
-        }
+          if (!mounted || !newSession?.user?.email) return;
+          applySession(newSession);
         }
       );
 
-      // Give it a moment to process the invite token
+      // Give it a moment to process
       window.setTimeout(() => {
         if (!mounted) return;
         setIsChecking(false);

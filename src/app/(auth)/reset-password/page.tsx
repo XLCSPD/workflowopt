@@ -59,34 +59,67 @@ export default function ResetPasswordPage() {
 
   // Check if user has a valid recovery session
   useEffect(() => {
+    let mounted = true;
+
     const checkSession = async () => {
+      // 1. Check for existing session (e.g. PKCE code was already exchanged by /auth/callback)
       const { data: { session } } = await supabase.auth.getSession();
-      
-      // User should have a session from the recovery link
+
       if (session) {
         setIsValidSession(true);
-      } else {
-        // Listen for auth state changes (recovery link will trigger this)
-        const { data: { subscription } } = supabase.auth.onAuthStateChange(
-          async (event: string) => {
-            if (event === "PASSWORD_RECOVERY") {
-              setIsValidSession(true);
-            }
-          }
-        );
-
-        // Give it a moment to process the recovery token
-        setTimeout(() => {
-          if (isValidSession === null) {
-            setIsValidSession(false);
-          }
-        }, 2000);
-
-        return () => subscription.unsubscribe();
+        return;
       }
+
+      // 2. Handle implicit flow: extract tokens from URL hash fragment.
+      //    @supabase/ssr uses PKCE by default and won't auto-detect hash tokens.
+      const hash = window.location.hash.substring(1);
+      if (hash) {
+        const params = new URLSearchParams(hash);
+        const accessToken = params.get("access_token");
+        const refreshToken = params.get("refresh_token");
+        const type = params.get("type");
+
+        if (accessToken && refreshToken) {
+          const { data: sessionData, error } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken,
+          });
+
+          window.history.replaceState(null, "", window.location.pathname);
+
+          if (!error && sessionData.session) {
+            setIsValidSession(type === "recovery" || true);
+            return;
+          }
+        }
+      }
+
+      if (!mounted) return;
+
+      // 3. Fallback: listen for auth state changes
+      const { data: { subscription } } = supabase.auth.onAuthStateChange(
+        async (event: string) => {
+          if (event === "PASSWORD_RECOVERY") {
+            setIsValidSession(true);
+          }
+        }
+      );
+
+      setTimeout(() => {
+        if (!mounted) return;
+        if (isValidSession === null) {
+          setIsValidSession(false);
+        }
+      }, 2500);
+
+      return () => subscription.unsubscribe();
     };
 
     checkSession();
+
+    return () => {
+      mounted = false;
+    };
   }, [supabase.auth, isValidSession]);
 
   async function onSubmit(data: ResetPasswordFormData) {
